@@ -43,7 +43,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Bump version
-        run: npm version ${{ inputs.version }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: npm version "$VERSION"
 
       - name: Publish to npm
         run: npm publish

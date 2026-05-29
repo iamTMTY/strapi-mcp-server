@@ -153,7 +153,14 @@ function decryptBlob(strapi: Core.Strapi, blob: string): string {
   const iv = Buffer.from(parts[1], 'base64url');
   const tag = Buffer.from(parts[2], 'base64url');
   const enc = Buffer.from(parts[3], 'base64url');
-  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  // Pin authTagLength to 16 bytes (GCM's full 128-bit tag) so an attacker who
+  // can forge the stored blob can't downgrade to a shorter tag and brute-force
+  // it. encryptBlob always emits a 16-byte tag via getAuthTag(); reject any
+  // blob that doesn't match before handing it to setAuthTag.
+  if (tag.length !== 16) {
+    throw new Error('GCM auth tag has unexpected length');
+  }
+  const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
 }
