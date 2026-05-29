@@ -1,0 +1,31 @@
+{
+  "kind": "collectionType",
+  "collectionName": "mcp_oauth_auth_codes",
+  "info": {
+    "singularName": "oauth-auth-code",
+    "pluralName": "oauth-auth-codes",
+    "displayName": "MCP OAuth Auth Code"
+  },
+  "options": { "draftAndPublish": false },
+  "pluginOptions": {
+    "content-manager": { "visible": false },
+    "content-type-builder": { "visible": false }
+  },
+  "attributes": {
+    "codeHash": { "type": "string", "required": true, "maxLength": 128, "private": true },
+    "clientId": { "type": "string", "required": true, "maxLength": 128 },
+    "adminUserId": { "type": "string", "required": true, "maxLength": 64 },
+    "scope": { "type": "string", "required": true, "maxLength": 512 },
+    "redirectUri": { "type": "string", "required": true, "maxLength": 2048 },
+    "codeChallenge": { "type": "string", "required": true, "maxLength": 256 },
+    "codeChallengeMethod": {
+      "type": "enumeration",
+      "enum": ["S256"],
+      "required": true,
+      "default": "S256"
+    },
+    "resource": { "type": "string", "required": true, "maxLength": 2048 },
+    "used": { "type": "boolean", "default": false, "required": true },
+    "expiresAt": { "type": "datetime", "required": true }
+  }
+}

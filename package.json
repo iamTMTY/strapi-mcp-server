@@ -1,0 +1,105 @@
+{
+  "name": "strapi-mcp-server",
+  "version": "0.1.0",
+  "description": "Expose Strapi v5 as a Model Context Protocol server with OAuth 2.1 + PKCE.",
+  "keywords": [
+    "strapi",
+    "strapi-plugin",
+    "mcp",
+    "model-context-protocol",
+    "oauth",
+    "ai",
+    "llm"
+  ],
+  "license": "MIT",
+  "author": "Temitayo Salaudeen",
+  "type": "commonjs",
+  "exports": {
+    "./strapi-admin": {
+      "source": "./admin/src/index.tsx",
+      "import": "./dist/admin/index.mjs",
+      "require": "./dist/admin/index.js",
+      "default": "./dist/admin/index.js"
+    },
+    "./strapi-server": {
+      "source": "./server/src/index.ts",
+      "import": "./dist/server/index.mjs",
+      "require": "./dist/server/index.js",
+      "default": "./dist/server/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "admin",
+    "server"
+  ],
+  "workspaces": [
+    "__tests__/fixtures/test-app"
+  ],
+  "scripts": {
+    "build": "strapi-plugin build",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "test": "jest --selectProjects unit",
+    "test:unit": "jest --selectProjects unit",
+    "test:integration": "jest --selectProjects integration",
+    "test:all": "jest",
+    "test-app": "npm --workspace=strapi-mcp-server-test-app run develop",
+    "test-app:build": "npm --workspace=strapi-mcp-server-test-app run build",
+    "test-app:reset": "rm -f __tests__/fixtures/test-app/database.sqlite",
+    "dev": "concurrently -n plugin,test-app -c blue,green \"npm run watch\" \"npm run test-app\"",
+    "inspect": "npx @modelcontextprotocol/inspector",
+    "verify": "strapi-plugin verify",
+    "watch": "strapi-plugin watch",
+    "watch:link": "strapi-plugin watch:link",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,json,md}": "prettier --write"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@strapi/design-system": "^2.0.0",
+    "@strapi/icons": "^2.0.0",
+    "ioredis": "^5.4.1",
+    "jose": "^5.9.6",
+    "react-intl": "^6.6.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@strapi/sdk-plugin": "^5.3.2",
+    "@strapi/strapi": "^5.0.0",
+    "@strapi/typescript-utils": "^5.0.0",
+    "@types/jest": "^29.5.13",
+    "@types/koa": "^2.15.0",
+    "@types/node": "^20.16.10",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "concurrently": "^9.2.1",
+    "husky": "^9.1.7",
+    "jest": "^30.3.0",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.2",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "react-router-dom": "^6.30.0",
+    "styled-components": "^6.0.0",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.4.11",
+    "typescript": "^5.6.2"
+  },
+  "peerDependencies": {
+    "@strapi/strapi": "^5.0.0",
+    "@strapi/utils": "^5.0.0",
+    "react": "^17.0.0 || ^18.0.0",
+    "react-dom": "^17.0.0 || ^18.0.0",
+    "react-router-dom": "^6.30.0",
+    "styled-components": "^6.0.0"
+  },
+  "strapi": {
+    "kind": "plugin",
+    "name": "mcp-server",
+    "displayName": "MCP Server",
+    "description": "Expose Strapi as a Model Context Protocol server with OAuth 2.1 + PKCE."
+  }
+}

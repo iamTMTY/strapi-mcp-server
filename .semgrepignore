@@ -1,0 +1,14 @@
+# Mirror the CI scan scope: only our product source (server/src, admin/src) is
+# meaningful for SAST. Everything below is generated, third-party, or test
+# fixtures full of deliberate fake secrets/tokens that would create noise.
+
+node_modules/
+dist/
+build/
+.cache/
+.tmp/
+coverage/
+
+# Generated Strapi fixture app + tests (contain intentional dummy secrets and
+# pasted sample JWTs that are not production code).
+__tests__/

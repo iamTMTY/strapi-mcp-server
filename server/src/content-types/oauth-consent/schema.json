@@ -1,0 +1,21 @@
+{
+  "kind": "collectionType",
+  "collectionName": "mcp_oauth_consents",
+  "info": {
+    "singularName": "oauth-consent",
+    "pluralName": "oauth-consents",
+    "displayName": "MCP OAuth Consent"
+  },
+  "options": { "draftAndPublish": false },
+  "pluginOptions": {
+    "content-manager": { "visible": false },
+    "content-type-builder": { "visible": false }
+  },
+  "attributes": {
+    "clientId": { "type": "string", "required": true, "maxLength": 128 },
+    "adminUserId": { "type": "string", "required": true, "maxLength": 64 },
+    "scope": { "type": "string", "required": true, "maxLength": 512 },
+    "grantedAt": { "type": "datetime", "required": true },
+    "expiresAt": { "type": "datetime", "required": true }
+  }
+}

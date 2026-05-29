@@ -1,0 +1,52 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    name: Semgrep (SAST)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      # Blocking gate: any ERROR-severity finding fails the job (and the PR).
+      # Rulesets cover OWASP Top 10 + JS/TS/Node + React (admin) + secrets.
+      # Path excludes come from .semgrepignore (generated dist, deps, fixtures, tests).
+      - name: Semgrep — block on ERROR
+        run: |
+          semgrep scan \
+            --config p/owasp-top-ten \
+            --config p/javascript \
+            --config p/typescript \
+            --config p/nodejs \
+            --config p/react \
+            --config p/secrets \
+            --severity ERROR \
+            --error \
+            --metrics off
+
+      # Non-blocking visibility into lower-severity findings — surfaced in the
+      # job log for triage without wedging the PR.
+      - name: Semgrep — report WARNING/INFO
+        continue-on-error: true
+        run: |
+          semgrep scan \
+            --config p/owasp-top-ten \
+            --config p/javascript \
+            --config p/typescript \
+            --config p/nodejs \
+            --config p/react \
+            --config p/secrets \
+            --severity WARNING \
+            --metrics off

@@ -1,0 +1,25 @@
+{
+  "kind": "collectionType",
+  "collectionName": "mcp_oauth_refresh_tokens",
+  "info": {
+    "singularName": "oauth-refresh-token",
+    "pluralName": "oauth-refresh-tokens",
+    "displayName": "MCP OAuth Refresh Token"
+  },
+  "options": { "draftAndPublish": false },
+  "pluginOptions": {
+    "content-manager": { "visible": false },
+    "content-type-builder": { "visible": false }
+  },
+  "attributes": {
+    "tokenHash": { "type": "string", "required": true, "maxLength": 128, "private": true },
+    "familyId": { "type": "string", "required": true, "maxLength": 64 },
+    "parentJti": { "type": "string", "maxLength": 64 },
+    "clientId": { "type": "string", "required": true, "maxLength": 128 },
+    "adminUserId": { "type": "string", "required": true, "maxLength": 64 },
+    "scope": { "type": "string", "required": true, "maxLength": 512 },
+    "rotatedTo": { "type": "string", "maxLength": 128 },
+    "revoked": { "type": "boolean", "default": false, "required": true },
+    "expiresAt": { "type": "datetime", "required": true }
+  }
+}

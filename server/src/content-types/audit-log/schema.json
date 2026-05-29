@@ -1,0 +1,32 @@
+{
+  "kind": "collectionType",
+  "collectionName": "mcp_audit_log",
+  "info": {
+    "singularName": "audit-log",
+    "pluralName": "audit-logs",
+    "displayName": "MCP Audit Log",
+    "description": "Append-only log of every MCP tool call."
+  },
+  "options": {
+    "draftAndPublish": false,
+    "comment": ""
+  },
+  "pluginOptions": {
+    "content-manager": { "visible": false },
+    "content-type-builder": { "visible": false }
+  },
+  "attributes": {
+    "ts": { "type": "datetime", "required": true },
+    "principalType": { "type": "string", "required": true, "maxLength": 32 },
+    "principalId": { "type": "string", "required": true, "maxLength": 128 },
+    "sessionId": { "type": "string", "maxLength": 128 },
+    "clientId": { "type": "string", "maxLength": 128 },
+    "tool": { "type": "string", "required": true, "maxLength": 128 },
+    "params": { "type": "json" },
+    "resultStatus": { "type": "enumeration", "enum": ["ok", "error"], "required": true },
+    "errorCode": { "type": "string", "maxLength": 64 },
+    "ip": { "type": "string", "maxLength": 64 },
+    "userAgent": { "type": "string", "maxLength": 512 },
+    "durationMs": { "type": "integer" }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "extends": "@strapi/typescript-utils/tsconfigs/server",
+  "include": ["./src", "./config", "./types", "src/**/*.json"],
+  "exclude": ["node_modules/", "build/", "dist/", ".cache/", ".tmp/", "database/"],
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "ignoreDeprecations": "5.0"
+  }
+}

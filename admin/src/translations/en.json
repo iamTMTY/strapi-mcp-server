@@ -1,0 +1,8 @@
+{
+  "plugin.name": "MCP Server",
+  "page.dashboard": "Dashboard",
+  "page.clients": "OAuth Clients",
+  "page.tools": "Tools",
+  "page.audit": "Audit Log",
+  "page.settings": "Settings"
+}

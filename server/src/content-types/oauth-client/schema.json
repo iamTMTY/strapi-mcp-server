@@ -1,0 +1,33 @@
+{
+  "kind": "collectionType",
+  "collectionName": "mcp_oauth_clients",
+  "info": {
+    "singularName": "oauth-client",
+    "pluralName": "oauth-clients",
+    "displayName": "MCP OAuth Client"
+  },
+  "options": { "draftAndPublish": false },
+  "pluginOptions": {
+    "content-manager": { "visible": false },
+    "content-type-builder": { "visible": false }
+  },
+  "attributes": {
+    "clientId": { "type": "uid", "required": true, "targetField": "clientName" },
+    "clientName": { "type": "string", "required": true, "maxLength": 200 },
+    "clientSecretHash": { "type": "string", "private": true, "maxLength": 128 },
+    "isConfidential": { "type": "boolean", "default": false, "required": true },
+    "redirectUris": { "type": "json", "required": true },
+    "grantTypes": { "type": "json", "required": true },
+    "scopes": { "type": "json", "required": true },
+    "tokenEndpointAuthMethod": {
+      "type": "enumeration",
+      "enum": ["none", "client_secret_basic", "client_secret_post"],
+      "required": true,
+      "default": "none"
+    },
+    "ownerAdminId": { "type": "string", "maxLength": 64 },
+    "createdByAdminId": { "type": "string", "maxLength": 64 },
+    "lastUsedAt": { "type": "datetime" },
+    "disabled": { "type": "boolean", "default": false, "required": true }
+  }
+}

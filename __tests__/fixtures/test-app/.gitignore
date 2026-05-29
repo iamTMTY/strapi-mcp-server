@@ -1,0 +1,11 @@
+node_modules/
+.cache/
+build/
+dist/
+.data/
+.tmp/
+*.sqlite
+database/
+.env
+.env.local
+exports/

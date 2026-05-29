@@ -1,0 +1,25 @@
+{
+  "name": "strapi-mcp-server-test-app",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Minimal Strapi v5 app used by strapi-mcp-server integration tests. Also runnable manually for plugin development.",
+  "scripts": {
+    "build": "strapi build",
+    "develop": "strapi develop",
+    "start": "strapi start",
+    "strapi": "strapi"
+  },
+  "dependencies": {
+    "@strapi/strapi": "^5.0.0",
+    "better-sqlite3": "^11.3.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "react-router-dom": "^6.30.0",
+    "strapi-mcp-server": "file:../../..",
+    "styled-components": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

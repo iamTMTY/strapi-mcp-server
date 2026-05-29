@@ -1,0 +1,21 @@
+{
+  "kind": "collectionType",
+  "collectionName": "mcp_oauth_signing_keys",
+  "info": {
+    "singularName": "oauth-signing-key",
+    "pluralName": "oauth-signing-keys",
+    "displayName": "MCP OAuth Signing Key"
+  },
+  "options": { "draftAndPublish": false },
+  "pluginOptions": {
+    "content-manager": { "visible": false },
+    "content-type-builder": { "visible": false }
+  },
+  "attributes": {
+    "kid": { "type": "string", "required": true, "unique": true, "maxLength": 64 },
+    "alg": { "type": "string", "required": true, "default": "RS256", "maxLength": 16 },
+    "publicJwk": { "type": "json", "required": true },
+    "privateJwkEncrypted": { "type": "text", "required": true, "private": true },
+    "retiredAt": { "type": "datetime" }
+  }
+}

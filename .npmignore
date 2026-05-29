@@ -1,0 +1,11 @@
+node_modules
+.strapi
+*.log
+.env
+.env.*
+coverage
+__tests__
+*.test.ts
+*.test.tsx
+tsconfig.json
+tsconfig.build.json

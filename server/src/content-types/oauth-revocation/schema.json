@@ -1,0 +1,18 @@
+{
+  "kind": "collectionType",
+  "collectionName": "mcp_oauth_revocations",
+  "info": {
+    "singularName": "oauth-revocation",
+    "pluralName": "oauth-revocations",
+    "displayName": "MCP OAuth Revoked JTI"
+  },
+  "options": { "draftAndPublish": false },
+  "pluginOptions": {
+    "content-manager": { "visible": false },
+    "content-type-builder": { "visible": false }
+  },
+  "attributes": {
+    "jti": { "type": "string", "required": true, "unique": true, "maxLength": 64 },
+    "expiresAt": { "type": "datetime", "required": true }
+  }
+}
