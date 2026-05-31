@@ -1,6 +1,6 @@
 {
   "name": "strapi-mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Expose Strapi v5 as a Model Context Protocol server with OAuth 2.1 + PKCE.",
   "keywords": [
     "strapi",
