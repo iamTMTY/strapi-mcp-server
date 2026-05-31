@@ -11,6 +11,7 @@ Expose a Strapi v5 instance as a **Model Context Protocol** (MCP) server. AI cli
 - [External AS mode](#external-as-mode)
 - [Endpoints](#endpoints)
 - [Tools](#tools)
+- [Use cases](#use-cases)
 - [Horizontal scale](#horizontal-scale)
 
 ## Quick setup
@@ -349,6 +350,79 @@ The plugin reserves `/mcp`, `/.well-known/oauth-*`, `/oauth/*`, and `/register` 
 | `strapi.media.upload`                      | `strapi:media:write`   |
 
 Delete, publish/unpublish, and user/role management are deliberately omitted. Every tool re-checks its scope and the Strapi RBAC permission at call time.
+
+## Use cases
+
+Practical prompts you can paste into any connected AI client. Two ground rules apply to every example:
+
+- **Every entry the AI creates or updates lands as a draft.** Publishing stays a human action in the Strapi UI — by design, no publish tool is exposed.
+- **The AI sees exactly what your role sees.** Same Strapi RBAC the Content Manager uses. If your role can't read a content type, neither can the AI talking through your token.
+
+### Analyze (read-only)
+
+**Tour my content model.** The AI walks the schema for every type you can read and gives you a human map.
+
+> Walk me through every content type in my Strapi. For each, summarize what it represents, list its fields and types, and flag anything under-specified (missing meta description, no slug field, no relations).
+
+**Editorial audit.** Scan content for problems without changing anything.
+
+> Audit all published Articles. Tell me which are missing a meta description, have a body under 300 words, lack a featured image, or use a tag we no longer use [list of deprecated tags]. Group your findings by author.
+
+**Find duplicates and near-duplicates.** Cross-entry comparison the AI is naturally good at; tedious manually.
+
+> Look at all Articles tagged `product-update`. Cluster ones that cover the same release or feature so I can decide whether to merge, redirect, or unpublish. Show the documentIds for each cluster.
+
+**Cross-type relationship mapping.** Uses `populate` to walk relations — hard to do in the UI.
+
+> For our top 10 Products (by `popularity`), find every Article that mentions them. Build me a table: product, article count, sample titles, last-mention date.
+
+**Locale gap report.** Find entries that should have been translated but weren't.
+
+> For every published Article in English, check whether a French version exists. Give me the list of slugs that are English-only, sorted by publish date so I can prioritize.
+
+**Tag taxonomy hygiene.** Find semantic duplicates humans gloss over.
+
+> Look at every tag used across Articles. Group ones that probably mean the same thing (e.g. `ai`, `AI`, `artificial-intelligence`). Recommend a canonical form for each cluster.
+
+**Image hygiene.** Uses `media.list`. Surfaces issues humans don't track.
+
+> Audit our media library. Find images with no alt text, oversized images (>2 MB), or images uploaded > 1 year ago that aren't referenced by any Article. Don't delete anything — just report.
+
+**Content brief from existing material.** Synthesize a brief out of what's already published before you write something new.
+
+> I want to write a new pillar article on "edge caching." Before I start, find the 5 most relevant existing Articles and Products, summarize what we've already said, identify gaps we haven't covered, and suggest a structure that doesn't duplicate existing content.
+
+### Create (drafts)
+
+**Bulk-create from an outline.** Turn one prompt + outline into N drafts. Beats clicking "New entry" 30 times.
+
+> Here are 12 article ideas for our Q3 content calendar [paste list]. For each, create a draft Article with a title, slug, 60-word excerpt, and a 300-word first-draft body. Tag them with `editorial-todo` so I can find them.
+
+**Translate / localize a batch.** AI reads the English version, creates a draft for each in another locale, preserves slug and structure.
+
+> Find the 20 most recently updated English Articles. For each, create a French draft preserving the same slug, structure, and tone. Don't publish — I'll review in Strapi.
+
+**Generate A/B variants.** Draft variants for testing.
+
+> For Article `<documentId>`, create two draft variants of the headline + lead paragraph — one more curiosity-driven, one more direct. Keep the body unchanged. Use the slug pattern `<slug>-variant-a` and `<slug>-variant-b`.
+
+**Stub the rest of a new content type.** Uses `get_schema` to understand fields, then fills realistic placeholders.
+
+> I just created a new content type called `case-study`. Read its schema, then create 5 stub drafts so I can see how a populated listing page would look. Use realistic-sounding company names but obviously-fake numbers.
+
+### Update (drafts)
+
+**Bulk fix a consistent mistake.** Find-and-update across the catalog without writing a script.
+
+> Every Article that references our old product name "Foo" should be updated to use "Bar." Don't change the meaning of any sentence — just swap the name and any obvious derivatives (URLs, headings, CTAs). Update them as drafts so I can review.
+
+**Missing-field backfill.** AI generates the missing piece _from_ the existing content. Especially useful for SEO fields.
+
+> Find every published Article missing a meta description. For each, draft a 150-character meta description based on the body. Update the entries as drafts.
+
+**Editorial style normalization.** Rewrites for tone consistency without changing semantics.
+
+> Our older Articles (published before 2024) used a more formal voice. Pick 5 of them, rewrite the intros to match our current conversational style guide [paste guide]. Save as drafts — same documentId, just an updated draft revision.
 
 ## Horizontal scale
 

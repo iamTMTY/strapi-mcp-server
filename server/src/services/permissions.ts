@@ -2,7 +2,8 @@
 
 import type { Core } from '@strapi/strapi';
 
-const INTERNAL_UID = /^(admin::|strapi::|plugin::users-permissions\.(role|permission)|plugin::i18n\.locale|plugin::upload\.(folder|file)$|plugin::mcp-server\.)/;
+const INTERNAL_UID =
+  /^(admin::|strapi::|plugin::users-permissions\.(role|permission)|plugin::i18n\.locale|plugin::upload\.(folder|file)$|plugin::mcp-server\.)/;
 
 export interface PrincipalContext {
   user: { id: number | string; isActive?: boolean };
@@ -44,7 +45,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const permSvc = strapi.service('admin::permission');
     let permissions: unknown[] = [];
     try {
-      permissions = await permSvc.findUserPermissions({ user });
+      // Strapi v5 signature: findUserPermissions(user) — pass the user object
+      // directly, NOT wrapped in `{ user }`. Wrapping makes `user.id` resolve
+      // to undefined inside the query, producing "Undefined binding ... t4.id"
+      // Knex errors. Super-admins short-circuited above so this only bites
+      // non-super-admin roles, masquerading as "no permissions found."
+      permissions = await permSvc.findUserPermissions(user);
     } catch (err) {
       strapi.log.warn('[mcp-server] findUserPermissions failed', err as Error);
     }
