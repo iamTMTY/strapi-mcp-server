@@ -39,6 +39,7 @@
   ],
   "scripts": {
     "build": "strapi-plugin build",
+    "prepack": "npm run build",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "test": "jest --selectProjects unit",
     "test:unit": "jest --selectProjects unit",
