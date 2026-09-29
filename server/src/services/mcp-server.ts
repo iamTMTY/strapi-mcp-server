@@ -156,22 +156,30 @@ async function runTool(
   try {
     if (!auth)
       throw Object.assign(new Error('Missing request authentication.'), { code: 'unauthorized' });
-    const result = await Promise.race([
-      tool.handler(raw, {
-        principal: auth.principal,
-        scopes: auth.scopes,
-        clientId: auth.clientId,
-      }),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () =>
-            reject(
-              Object.assign(new Error(`Tool timed out after ${timeoutMs} ms.`), { code: 'timeout' })
-            ),
-          timeoutMs
-        );
-      }),
-    ]);
+    const work = tool.handler(raw, {
+      principal: auth.principal,
+      scopes: auth.scopes,
+      clientId: auth.clientId,
+    });
+    // A race can't cancel a database write halfway, so only read-only tools
+    // are cut off: telling the model a write "timed out" while it may still
+    // land would invite a duplicate retry. Writes run to completion.
+    const result = !tool.annotations.readOnlyHint
+      ? await work
+      : await Promise.race([
+          work,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () =>
+                reject(
+                  Object.assign(new Error(`Tool timed out after ${timeoutMs} ms.`), {
+                    code: 'timeout',
+                  })
+                ),
+              timeoutMs
+            );
+          }),
+        ]);
     audit('ok');
     return result;
   } catch (err) {

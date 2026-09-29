@@ -52,7 +52,7 @@ Upgrading is strongly recommended.
 - `strapi_media_request_upload` — a single-use, short-lived URL for uploading a local file of any size with `curl` (or a browser form). Files go through Strapi's upload service to your configured provider.
 - `strapi_media_get`, `strapi_media_list_folders`, `strapi_media_update`, `strapi_media_move`
 - `strapi_media_create_folder` (mkdir -p), `strapi_media_rename_folder`, `strapi_media_move_folder`
-- `strapi_media_delete` and `strapi_media_delete_folder` (scope `strapi:media:delete`), both with `dryRun`
+- `strapi_media_delete` and `strapi_media_delete_folder` (scope `strapi:media:delete`), both with `dryRun`. Folder deletion checks every file inside against the role's permissions (e.g. "own files only") and deletes nothing if any is off-limits — stricter than Strapi's own bulk delete
 - Every placing tool accepts `folderId` or `folderPath` (`"templates/thumbnails"`, created if missing).
 - `strapi_media_list` filters by folder, MIME (`"image"` = any image, `"image/png"` exact) and name.
 - Media responses never include `hash`, `provider`, `provider_metadata`, `formats` or `folderPath`.
@@ -65,7 +65,7 @@ Upgrading is strongly recommended.
 - Content-type schemas exposed as MCP resources (`strapi://content-types/{uid}/schema`).
 - **Extension point**: other plugins can add tools via `strapi.plugin('mcp-server').service('tool-registry').register(...)`.
 - Stable error codes: `insufficient_scope`, `forbidden`, `not_found`, `bad_request`, `timeout`, `upload_provider_error`, `internal_error`.
-- New config: `requestTimeoutMs` (60 s), `audit.recordReads`, `upload.ticketTtlSec`, `oauth.refreshFamilyMaxAgeSec`, `oauth.dcr.allowedRedirectHosts`, `oauth.external.audience`.
+- New config: `requestTimeoutMs` (60 s, read-only tools; writes always run to completion), `audit.recordReads`, `upload.ticketTtlSec`, `oauth.refreshFamilyMaxAgeSec`, `oauth.dcr.allowedRedirectHosts`, `oauth.external.audience`.
 - MCP requests carry the admin as `ctx.state.user`, so Strapi's request-scoped features (e.g. Enterprise audit logs) can attribute changes.
 
 ### Changed

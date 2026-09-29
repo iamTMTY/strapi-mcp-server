@@ -14,11 +14,12 @@ import { getConfig } from '../../config';
 import {
   forbidden,
   UPLOAD_ACTIONS,
+  FILE_UID,
   type UploadPermissionsManager,
   type PrincipalContext,
 } from '../permissions';
 import { authorizationServerUrl } from '../oauth/audience';
-import { defineTool, badRequest, notFound, type ToolAuth, type ToolDef } from './common';
+import { defineTool, badRequest, notFound, withCode, type ToolAuth, type ToolDef } from './common';
 
 const MIME_RE = /^[\w.-]+\/[\w.+-]+$/;
 const FILENAME_RE = /^[A-Za-z0-9._\- ()]{1,255}$/;
@@ -86,15 +87,55 @@ export function createMediaTools(strapi: Core.Strapi): ToolDef[] {
     const pm = await manager(auth, action);
     const file = (await uploadSvc().findOne(id, ['createdBy', 'folder'])) as FileRow | null;
     if (!file) throw notFound('File not found.');
-    const creatorId = (file.createdBy as { id?: number } | undefined)?.id;
-    const author = creatorId
-      ? await strapi.db
-          .query('admin::user')
-          .findOne({ where: { id: creatorId }, populate: { roles: true } })
-      : null;
-    if (pm.ability.cannot(pm.action, pm.toSubject({ ...file, createdBy: author })))
-      throw forbidden();
+    if (!(await fileAllowed(pm, file, new Map()))) throw forbidden();
     return { pm, file };
+  }
+
+  /**
+   * Conditions like "is creator" / "same role as creator" need the creator
+   * *with roles* on the subject. `authors` caches creators across a batch.
+   */
+  async function fileAllowed(
+    pm: UploadPermissionsManager,
+    file: FileRow,
+    authors: Map<number, unknown>
+  ): Promise<boolean> {
+    const creatorId = (file.createdBy as { id?: number } | undefined)?.id;
+    let author: unknown = null;
+    if (creatorId) {
+      if (!authors.has(creatorId)) {
+        authors.set(
+          creatorId,
+          await strapi.db
+            .query('admin::user')
+            .findOne({ where: { id: creatorId }, populate: { roles: true } })
+        );
+      }
+      author = authors.get(creatorId);
+    }
+    return !pm.ability.cannot(pm.action, pm.toSubject({ ...file, createdBy: author }));
+  }
+
+  /**
+   * Files matching `where` the role may NOT act on. Without conditions on the
+   * action the answer is "none" and we skip loading every file.
+   */
+  async function forbiddenFiles(
+    pm: UploadPermissionsManager,
+    where: Record<string, unknown>
+  ): Promise<number[]> {
+    const rules = pm.ability.rulesFor?.(pm.action, FILE_UID);
+    if (rules && !rules.some((r) => r.conditions || r.inverted)) return [];
+    const files = (await strapi.db
+      .query(FILE_UID)
+      .findMany({ where, populate: { createdBy: true } })) as FileRow[];
+    const authors = new Map<number, unknown>();
+    const denied: number[] = [];
+    for (const f of files) {
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await fileAllowed(pm, f, authors))) denied.push(f.id as number);
+    }
+    return denied;
   }
 
   const idSchema = z
@@ -416,7 +457,8 @@ export function createMediaTools(strapi: Core.Strapi): ToolDef[] {
         })
         .strict(),
       async run({ ids, dryRun }, auth) {
-        await manager(auth, UPLOAD_ACTIONS.update);
+        // Strapi's Media Library gates deletion on the "update" action.
+        const pm = await manager(auth, UPLOAD_ACTIONS.update);
         const folders = (await strapi.db
           .query(FOLDER_UID)
           .findMany({ where: { id: { $in: ids } }, select: ['id', 'name', 'path'] })) as Array<{
@@ -433,6 +475,18 @@ export function createMediaTools(strapi: Core.Strapi): ToolDef[] {
             { [field]: { $startsWith: `${f.path}/` } },
           ]),
         });
+        // The cascade deletes every file inside; each must be one the role may
+        // manage (e.g. "own files only"), or nothing is deleted. Stricter than
+        // Strapi's own bulk delete, which only checks the action.
+        const denied = await forbiddenFiles(pm, under('folderPath'));
+        if (denied.length) {
+          throw withCode(
+            new Error(
+              `You may not delete ${denied.length} file(s) inside these folders (ids: ${denied.slice(0, 20).join(', ')}${denied.length > 20 ? ', …' : ''}). Nothing was deleted.`
+            ),
+            'forbidden'
+          );
+        }
         if (dryRun) {
           const [totalFolderNumber, totalFileNumber] = await Promise.all([
             strapi.db.query(FOLDER_UID).count({ where: under('path') }),

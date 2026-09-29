@@ -72,7 +72,10 @@ export interface McpConfig {
     recordReads: boolean;
   };
   tools: { enabled: Record<string, boolean> };
-  /** Upper bound for a single tool call; the model gets a `timeout` error past it. */
+  /**
+   * Upper bound for a read-only tool call (`timeout` error past it). Write
+   * tools always run to completion — a race can't cancel a half-done write.
+   */
   requestTimeoutMs: number;
   /**
    * Optional Redis, used only to share rate-limit buckets across instances.

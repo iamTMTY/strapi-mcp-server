@@ -183,7 +183,8 @@ Admin page permissions (registered in `register.ts`):
 - `strapi:media:read`: `list`, `get`, `list_folders`
 - `strapi:media:write`: `upload`, `request_upload`, `update`, `move`,
   `create_folder`, `rename_folder`, `move_folder`
-- `strapi:media:delete`: `delete`, `delete_folder`
+- `strapi:media:delete`: `delete`, `delete_folder` (`delete_folder` checks every file inside
+  with `forbiddenFiles` before cascading; Strapi's own bulk delete doesn't)
 
 Names use underscores; dotted 0.1 names still work as `tools.enabled` keys.
 Populate paths are turned into Strapi populate objects by `buildPopulate`,
@@ -192,7 +193,8 @@ ends in `storeUpload()`. Placing tools take `folderId` or `folderPath`
 (`ensureFolderPath` = mkdir -p). Third-party tools register through
 `tool-registry` (`strapi_` prefix reserved).
 
-`runTool` in `mcp-server.ts` enforces `requestTimeoutMs`, audits (skipping
+`runTool` in `mcp-server.ts` enforces `requestTimeoutMs` on read-only tools only
+(a race can't cancel a half-done write, so writes run to completion), audits (skipping
 successful reads when `audit.recordReads` is false) and maps errors to stable
 codes: `insufficient_scope`, `forbidden`, `not_found`, `bad_request`,
 `timeout`, `upload_provider_error`, `internal_error` (generic message).

@@ -541,6 +541,41 @@ describe('media', () => {
     });
   });
 
+  it('folder cascade delete refuses when the folder holds files the role may not manage', async () => {
+    const shared = await admin.tool('strapi_media_create_folder', { path: 'shared-cascade' });
+    const adminFile = await admin.tool('strapi_media_upload', {
+      filename: 'admins.png',
+      mime: 'image/png',
+      source: { base64: PNG },
+      folderId: shared.id,
+    });
+    // Author: Media Library update/delete is "own files only".
+    for (const dryRun of [true, false]) {
+      expect(
+        await author.tool('strapi_media_delete_folder', { ids: [shared.id], dryRun })
+      ).toMatchObject({
+        isError: true,
+        error: 'forbidden',
+      });
+    }
+    expect((await admin.tool('strapi_media_get', { id: adminFile.id })).id).toBe(adminFile.id);
+
+    // A folder holding only the author's own file can be deleted by the author.
+    const own = await author.tool('strapi_media_create_folder', { path: 'author-cascade' });
+    await author.tool('strapi_media_upload', {
+      filename: 'mine.png',
+      mime: 'image/png',
+      source: { base64: PNG },
+      folderId: own.id,
+    });
+    expect(await author.tool('strapi_media_delete_folder', { ids: [own.id] })).toMatchObject({
+      totalFolderNumber: 1,
+      totalFileNumber: 1,
+    });
+
+    await admin.tool('strapi_media_delete_folder', { ids: [shared.id] });
+  });
+
   it('refuses to fetch URLs on private addresses (SSRF)', async () => {
     const r = await admin.tool('strapi_media_upload', {
       filename: 'x.png',

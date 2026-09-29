@@ -199,20 +199,20 @@ Trigger the connection (Claude Code: `claude` → `/mcp` → **strapi**). A brow
 
 ### Media
 
-| Tool                          | Scope                 | Notes                                                                                                                      |
-| ----------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `strapi_media_list`           | `strapi:media:read`   | Filter by folder (`folderId`, `null` = root, or `folderPath`), MIME (`"image"` = any image, `"image/png"` exact) and name. |
-| `strapi_media_get`            | `strapi:media:read`   |                                                                                                                            |
-| `strapi_media_list_folders`   | `strapi:media:read`   | Full folder tree.                                                                                                          |
-| `strapi_media_upload`         | `strapi:media:write`  | base64 (small files) or a public http(s) URL.                                                                              |
-| `strapi_media_request_upload` | `strapi:media:write`  | One-time URL for pushing a local file of any size — see below.                                                             |
-| `strapi_media_update`         | `strapi:media:write`  | Name, alt text, caption, folder.                                                                                           |
-| `strapi_media_move`           | `strapi:media:write`  | Move files in bulk.                                                                                                        |
-| `strapi_media_create_folder`  | `strapi:media:write`  | `mkdir -p` for a path like `templates/thumbnails`; idempotent.                                                             |
-| `strapi_media_rename_folder`  | `strapi:media:write`  | Unique among siblings.                                                                                                     |
-| `strapi_media_move_folder`    | `strapi:media:write`  | Moves the whole subtree; can't move into itself or a descendant.                                                           |
-| `strapi_media_delete`         | `strapi:media:delete` | Files; `dryRun` supported.                                                                                                 |
-| `strapi_media_delete_folder`  | `strapi:media:delete` | Folders **and everything inside** (files removed from the provider too); `dryRun`; all-or-nothing.                         |
+| Tool                          | Scope                 | Notes                                                                                                                                                          |
+| ----------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `strapi_media_list`           | `strapi:media:read`   | Filter by folder (`folderId`, `null` = root, or `folderPath`), MIME (`"image"` = any image, `"image/png"` exact) and name.                                     |
+| `strapi_media_get`            | `strapi:media:read`   |                                                                                                                                                                |
+| `strapi_media_list_folders`   | `strapi:media:read`   | Full folder tree.                                                                                                                                              |
+| `strapi_media_upload`         | `strapi:media:write`  | base64 (small files) or a public http(s) URL.                                                                                                                  |
+| `strapi_media_request_upload` | `strapi:media:write`  | One-time URL for pushing a local file of any size — see below.                                                                                                 |
+| `strapi_media_update`         | `strapi:media:write`  | Name, alt text, caption, folder.                                                                                                                               |
+| `strapi_media_move`           | `strapi:media:write`  | Move files in bulk.                                                                                                                                            |
+| `strapi_media_create_folder`  | `strapi:media:write`  | `mkdir -p` for a path like `templates/thumbnails`; idempotent.                                                                                                 |
+| `strapi_media_rename_folder`  | `strapi:media:write`  | Unique among siblings.                                                                                                                                         |
+| `strapi_media_move_folder`    | `strapi:media:write`  | Moves the whole subtree; can't move into itself or a descendant.                                                                                               |
+| `strapi_media_delete`         | `strapi:media:delete` | Files; `dryRun` supported.                                                                                                                                     |
+| `strapi_media_delete_folder`  | `strapi:media:delete` | Folders **and everything inside** (files removed from the provider too); `dryRun`; all-or-nothing — refused if any file inside is one the role may not manage. |
 
 Media responses contain only `id, documentId, name, alternativeText, caption, url, mime, size, width, height, ext, folder` and timestamps — never `hash`, `provider`, `provider_metadata`, `formats` or `folderPath`. File ids and folder ids are separate numeric sequences.
 
@@ -221,7 +221,7 @@ Media responses contain only `id, documentId, name, alternativeText, caption, ur
 - Every result is returned both as JSON text and as `structuredContent`.
 - Errors carry a stable `error` code — `insufficient_scope`, `forbidden`, `not_found`, `bad_request`, `timeout`, `upload_provider_error`, `internal_error` — plus a message. Internal errors never leak stack traces or SQL.
 - Every tool has a `title` and MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so clients can auto-approve reads and ask before destructive calls.
-- Tool calls are capped at `requestTimeoutMs` (60 s).
+- Read-only tool calls are capped at `requestTimeoutMs` (60 s). Write tools always run to completion, so a write is never reported as failed while it may still land.
 - Content-type schemas are also exposed as MCP **resources** (`strapi://content-types/{uid}/schema`) for clients that attach context from resources.
 
 ## Permissions
@@ -277,7 +277,7 @@ All keys go under the plugin's `config: { ... }` block.
 | ------------------ | ---------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `resourceUrl`      | `string`   | _unset_    | Public URL of `/mcp` (e.g. `https://cms.example.com/mcp`); JWT `aud` and OAuth issuer origin. **Until it is set the plugin serves nothing** (public routes 404).           |
 | `allowedOrigins`   | `string[]` | _required_ | Origins allowed to call `/mcp` and `/oauth/*` from a browser. Clients without an `Origin` fall back to a Host check against `resourceUrl`. `'*'` is refused in production. |
-| `requestTimeoutMs` | `number`   | `60000`    | Upper bound for one tool call (1 000–600 000).                                                                                                                             |
+| `requestTimeoutMs` | `number`   | `60000`    | Upper bound for a read-only tool call (1 000–600 000). Writes are never cut off.                                                                                           |
 
 ### OAuth (`oauth.*`)
 

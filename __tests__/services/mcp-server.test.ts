@@ -97,6 +97,29 @@ describe('tool execution', () => {
     expect(JSON.parse(res.content[0].text).error).toBe('timeout');
   });
 
+  it('never times out write tools — they run to completion', async () => {
+    let finished = false;
+    registry.register({
+      name: 'acme_slow_write',
+      title: 'Slow write',
+      description: 'takes a while',
+      scope: 'strapi:content:write',
+      requires: 'content.update',
+      annotations: { readOnlyHint: false, destructiveHint: false },
+      inputSchema: z.object({}),
+      run: async () => {
+        await new Promise((r) => setTimeout(r, 60));
+        finished = true;
+        return { written: true };
+      },
+    });
+    const { call } = build({ requestTimeoutMs: 10 });
+    const res = await call('tools/call', { name: 'acme_slow_write', arguments: {} });
+    expect(res.isError).toBeUndefined();
+    expect(res.structuredContent).toEqual({ written: true });
+    expect(finished).toBe(true);
+  });
+
   it('skips auditing successful reads when audit.recordReads is false, but keeps errors', async () => {
     registry.register({
       name: 'acme_read',

@@ -39,7 +39,13 @@ export interface ContentChecker {
 export interface UploadPermissionsManager {
   isAllowed: boolean;
   action: string;
-  ability: { cannot: (action: string, subject: unknown) => boolean };
+  ability: {
+    cannot: (action: string, subject: unknown) => boolean;
+    rulesFor?: (
+      action: string,
+      subjectType: string
+    ) => Array<{ conditions?: unknown; inverted?: boolean }>;
+  };
   toSubject: (entity: unknown) => unknown;
   sanitizeQuery: (query: unknown) => Promise<any>;
   addPermissionsQueryTo: (query: unknown) => any;
