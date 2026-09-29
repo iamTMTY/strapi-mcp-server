@@ -46,25 +46,39 @@ function makeTokens(opts?: {
       refreshTable.push(row);
       return row;
     }),
-    findOne: jest.fn(async ({ where }: { where: Record<string, unknown> }) =>
-      refreshTable.find((r) => r.tokenHash === where.tokenHash) ?? null
+    findOne: jest.fn(
+      async ({ where }: { where: Record<string, unknown> }) =>
+        refreshTable.find((r) => r.tokenHash === where.tokenHash) ?? null
     ),
-    update: jest.fn(async ({ where, data }: { where: { id: number }; data: Partial<FakeRefreshRow> }) => {
-      const row = refreshTable.find((r) => r.id === where.id);
-      if (row) Object.assign(row, data);
-      return row;
-    }),
-    updateMany: jest.fn(async ({ where, data }: { where: Record<string, unknown>; data: Partial<FakeRefreshRow> }) => {
-      const familyId = where.familyId as string;
-      let n = 0;
-      for (const r of refreshTable) {
-        if (r.familyId === familyId) {
-          Object.assign(r, data);
-          n++;
-        }
+    update: jest.fn(
+      async ({ where, data }: { where: { id: number }; data: Partial<FakeRefreshRow> }) => {
+        const row = refreshTable.find((r) => r.id === where.id);
+        if (row) Object.assign(row, data);
+        return row;
       }
-      return { count: n };
-    }),
+    ),
+    updateMany: jest.fn(
+      async ({
+        where,
+        data,
+      }: {
+        where: Record<string, unknown>;
+        data: Partial<FakeRefreshRow>;
+      }) => {
+        let n = 0;
+        for (const r of refreshTable) {
+          const match =
+            'id' in where
+              ? r.id === where.id && r.rotatedTo === null && r.revoked === where.revoked
+              : r.familyId === where.familyId;
+          if (match) {
+            Object.assign(r, data);
+            n++;
+          }
+        }
+        return { count: n };
+      }
+    ),
   });
 
   const revQuery = mockQuery({
@@ -174,7 +188,11 @@ describe('tokens.verifyAccessToken (embedded)', () => {
 
   it('rejects revoked jti', async () => {
     const { tokens } = makeTokens({ revokedJtis: ['j-revoked'] });
-    const tok = await new SignJWT({ scope: 'strapi:content:read', client_id: 'cid', jti: 'j-revoked' })
+    const tok = await new SignJWT({
+      scope: 'strapi:content:read',
+      client_id: 'cid',
+      jti: 'j-revoked',
+    })
       .setProtectedHeader({ alg: key.alg, kid: key.kid, typ: 'at+jwt' })
       .setIssuer('http://localhost:1337')
       .setSubject('1')
@@ -202,7 +220,11 @@ describe('tokens.verifyAccessToken (embedded)', () => {
 describe('tokens.consumeRefresh — rotation + family revocation', () => {
   it('returns the row on first use', async () => {
     const { tokens } = makeTokens();
-    const minted = await tokens.mint({ adminUserId: '1', clientId: 'cid', scope: ['strapi:content:read'] });
+    const minted = await tokens.mint({
+      adminUserId: '1',
+      clientId: 'cid',
+      scope: ['strapi:content:read'],
+    });
     const row = await tokens.consumeRefresh(minted.refreshToken);
     expect(row).not.toBeNull();
     expect(row?.adminUserId).toBe('1');
@@ -210,13 +232,44 @@ describe('tokens.consumeRefresh — rotation + family revocation', () => {
 
   it('returns null on reuse AND revokes the entire family', async () => {
     const { tokens, refreshTable } = makeTokens();
-    const minted = await tokens.mint({ adminUserId: '1', clientId: 'cid', scope: ['strapi:content:read'] });
+    const minted = await tokens.mint({
+      adminUserId: '1',
+      clientId: 'cid',
+      scope: ['strapi:content:read'],
+    });
     // simulate prior rotation — mark first row as rotated
     refreshTable[0].rotatedTo = 'some-new-hash';
     const reused = await tokens.consumeRefresh(minted.refreshToken);
     expect(reused).toBeNull();
     // family revoked → row.revoked should now be true
     expect(refreshTable[0].revoked).toBe(true);
+  });
+
+  it('lets only one of two concurrent refreshes win, and revokes the family', async () => {
+    const { tokens, refreshTable } = makeTokens();
+    const minted = await tokens.mint({
+      adminUserId: '1',
+      clientId: 'cid',
+      scope: ['strapi:content:read'],
+    });
+    const results = await Promise.all([
+      tokens.consumeRefresh(minted.refreshToken),
+      tokens.consumeRefresh(minted.refreshToken),
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(refreshTable[0].revoked).toBe(true);
+  });
+
+  it('caps refresh expiry at the family deadline carried over on rotation', async () => {
+    const { tokens } = makeTokens();
+    const deadline = new Date(Date.now() + 60_000);
+    const minted = await tokens.mint({
+      adminUserId: '1',
+      clientId: 'cid',
+      scope: ['strapi:content:read'],
+      familyExpiresAt: deadline,
+    });
+    expect(minted.refreshTokenExpiresAt.getTime()).toBeLessThanOrEqual(deadline.getTime());
   });
 
   it('returns null for an unknown refresh token', async () => {
@@ -226,7 +279,11 @@ describe('tokens.consumeRefresh — rotation + family revocation', () => {
 
   it('returns null when refresh token is expired', async () => {
     const { tokens, refreshTable } = makeTokens();
-    const minted = await tokens.mint({ adminUserId: '1', clientId: 'cid', scope: ['strapi:content:read'] });
+    const minted = await tokens.mint({
+      adminUserId: '1',
+      clientId: 'cid',
+      scope: ['strapi:content:read'],
+    });
     // force expiry in the past
     refreshTable[0].expiresAt = new Date(Date.now() - 1000).toISOString();
     expect(await tokens.consumeRefresh(minted.refreshToken)).toBeNull();
@@ -234,7 +291,11 @@ describe('tokens.consumeRefresh — rotation + family revocation', () => {
 
   it('returns null when refresh token is already revoked', async () => {
     const { tokens, refreshTable } = makeTokens();
-    const minted = await tokens.mint({ adminUserId: '1', clientId: 'cid', scope: ['strapi:content:read'] });
+    const minted = await tokens.mint({
+      adminUserId: '1',
+      clientId: 'cid',
+      scope: ['strapi:content:read'],
+    });
     refreshTable[0].revoked = true;
     expect(await tokens.consumeRefresh(minted.refreshToken)).toBeNull();
   });

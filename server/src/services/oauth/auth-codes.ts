@@ -17,6 +17,7 @@ export interface AuthCodeRow {
   codeChallengeMethod: 'S256';
   resource: string;
   used: boolean;
+  familyId: string | null;
   expiresAt: string;
 }
 
@@ -53,26 +54,38 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     },
 
     /**
-     * Single-use, race-safe: read-then-update-where-used-false. Returns the
-     * row if it was the consumer; null otherwise (already used, expired, or
-     * not found). Caller is responsible for triggering family revocation on
-     * a "used" replay.
+     * Single-use, race-safe. Returns the row if this caller consumed it,
+     * 'replayed' if it was already used (revoking the refresh family minted
+     * from it), null if unknown or expired.
      */
     async consume(code: string): Promise<AuthCodeRow | 'replayed' | null> {
       const codeHash = sha256(code);
-      const row = (await strapi.db.query(UID).findOne({ where: { codeHash } })) as AuthCodeRow | null;
+      const row = (await strapi.db
+        .query(UID)
+        .findOne({ where: { codeHash } })) as AuthCodeRow | null;
       if (!row) return null;
       if (new Date(row.expiresAt).getTime() < Date.now()) return null;
-      if (row.used) return 'replayed';
+      if (row.used) {
+        // RFC 6749 §4.1.2: a replayed code should revoke what it minted.
+        if (row.familyId) {
+          await strapi.plugin('mcp-server').service('tokens').revokeFamily(row.familyId);
+        }
+        return 'replayed';
+      }
 
-      // Atomic-ish: update where used=false, then check rowcount via re-read.
-      await strapi.db.query(UID).update({
+      // Atomic claim: only the caller whose conditional update flips the row
+      // wins. Re-reading `used` afterwards can't tell two racers apart.
+      const { count } = await strapi.db.query(UID).updateMany({
         where: { id: row.id, used: false },
         data: { used: true },
       });
-      const after = (await strapi.db.query(UID).findOne({ where: { id: row.id } })) as AuthCodeRow | null;
-      if (!after || !after.used) return null;
-      return after;
+      if (count !== 1) return 'replayed';
+      return { ...row, used: true };
+    },
+
+    /** Link the refresh family minted from this code, so a replay can revoke it. */
+    async linkFamily(id: number, familyId: string): Promise<void> {
+      await strapi.db.query(UID).update({ where: { id }, data: { familyId } });
     },
   };
 };

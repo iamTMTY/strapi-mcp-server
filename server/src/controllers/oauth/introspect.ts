@@ -4,6 +4,7 @@ import type { Core } from '@strapi/strapi';
 import type { Context } from 'koa';
 import { getConfig } from '../../config';
 import { ensureEmbeddedMode } from './mode-guard';
+import { resolveAuth } from '../../policies/authenticate';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   /**
@@ -27,16 +28,15 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       return;
     }
     try {
-      const claims = await strapi
-        .plugin('mcp-server')
-        .service('tokens')
-        .verifyAccessToken(body.token);
+      // Same checks as /mcp: disabled clients, narrowed scopes and
+      // deactivated admins all report as they would be enforced.
+      const auth = await resolveAuth(strapi, body.token);
       ctx.body = {
         active: true,
-        sub: claims.sub,
-        scope: claims.scope.join(' '),
-        client_id: claims.clientId,
-        exp: claims.exp,
+        sub: auth.adminUserId,
+        scope: auth.scopes.join(' '),
+        client_id: auth.clientId,
+        exp: auth.exp,
       };
     } catch {
       ctx.body = { active: false };

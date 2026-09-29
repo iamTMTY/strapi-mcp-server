@@ -1,23 +1,72 @@
 'use strict';
 
-import type { ToolDef, ToolFactoryArgs } from './content';
+import type { Core } from '@strapi/strapi';
 import { createContentTools } from './content';
 import { createMediaTools } from './media';
 import { getConfig } from '../../config';
+import { UPLOAD_ACTIONS, type PrincipalContext } from '../permissions';
+import type { Scope } from '../oauth/scopes';
+import type { Capability, ToolDef } from './common';
 
-export type { ToolDef, ToolFactoryArgs };
+export type { ToolDef, ToolAuth, Capability } from './common';
+
+export function allTools(strapi: Core.Strapi): ToolDef[] {
+  return [
+    ...createContentTools(strapi),
+    ...createMediaTools(strapi),
+    ...strapi.plugin('mcp-server').service('tool-registry').list(),
+  ];
+}
+
+/** Pre-0.2 names (`strapi.content.list_types`) still work as config toggle keys. */
+function legacyName(name: string): string {
+  return name.replace(/^strapi_(content|media)_/, 'strapi.$1.');
+}
+
+export function isToolEnabled(strapi: Core.Strapi, name: string): boolean {
+  const toggles = getConfig(strapi).tools.enabled;
+  return toggles[name] ?? toggles[legacyName(name)] ?? true;
+}
 
 /**
- * Build the per-session tool list. Filters by:
- *  - granted scopes (a tool whose scope isn't granted is not registered at all)
- *  - master-toggle in config.tools.enabled[name] (default: true)
+ * What the principal's role can do anywhere: content actions on at least one
+ * content type, and each Media Library action. Mirrors Strapi's own rule of
+ * not exposing tools a token can't use.
  */
-export function buildToolsForSession(args: ToolFactoryArgs): ToolDef[] {
-  const cfg = getConfig(args.strapi);
-  const all = [...createContentTools(args), ...createMediaTools(args)];
-  return all.filter((t) => {
-    if (!args.scopes.includes(t.scope)) return false;
-    const toggle = cfg.tools.enabled[t.name];
-    return toggle === undefined ? true : toggle;
-  });
+export async function capabilitiesOf(
+  strapi: Core.Strapi,
+  principal: PrincipalContext
+): Promise<Set<Capability>> {
+  const perms = strapi.plugin('mcp-server').service('permissions');
+  const caps = new Set<Capability>();
+  const contentActions = ['read', 'create', 'update', 'delete', 'publish'] as const;
+  for (const uid of perms.listAllowedUids() as string[]) {
+    // eslint-disable-next-line no-await-in-loop
+    const c = await perms.contentChecker(principal, uid);
+    for (const a of contentActions) if (c.can[a]()) caps.add(`content.${a}`);
+    if (contentActions.every((a) => caps.has(`content.${a}`))) break;
+  }
+  for (const [cap, action] of [
+    ['media.read', UPLOAD_ACTIONS.read],
+    ['media.create', UPLOAD_ACTIONS.create],
+    ['media.update', UPLOAD_ACTIONS.update],
+  ] as const) {
+    // eslint-disable-next-line no-await-in-loop
+    if ((await perms.uploadManager(principal, action)).isAllowed) caps.add(cap);
+  }
+  return caps;
+}
+
+/**
+ * Tools to expose for one request: granted scope, config toggle, and a role
+ * that can actually use them. Handlers still re-check everything per call.
+ */
+export async function toolsFor(
+  strapi: Core.Strapi,
+  auth: { principal: PrincipalContext; scopes: Scope[] }
+): Promise<ToolDef[]> {
+  const caps = await capabilitiesOf(strapi, auth.principal);
+  return allTools(strapi).filter(
+    (t) => auth.scopes.includes(t.scope) && isToolEnabled(strapi, t.name) && caps.has(t.requires)
+  );
 }

@@ -33,17 +33,20 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       ctx.response.set('Retry-After', String(wait));
       ctx.status = 429;
       ctx.body = { error: 'too_many_requests', error_description: 'DCR rate limit exceeded' };
-      strapi.plugin('mcp-server').service('audit').record({
-        ts: new Date(),
-        principalType: 'system',
-        principalId: 'anonymous',
-        tool: 'oauth.dcr.register',
-        params: { rateLimited: true, retryAfterSec: wait },
-        resultStatus: 'error',
-        errorCode: 'too_many_requests',
-        ip,
-        userAgent,
-      });
+      strapi
+        .plugin('mcp-server')
+        .service('audit')
+        .record({
+          ts: new Date(),
+          principalType: 'system',
+          principalId: 'anonymous',
+          tool: 'oauth.dcr.register',
+          params: { rateLimited: true, retryAfterSec: wait },
+          resultStatus: 'error',
+          errorCode: 'too_many_requests',
+          ip,
+          userAgent,
+        });
       return;
     }
 
@@ -55,14 +58,32 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       token_endpoint_auth_method?: string;
       grant_types?: string[];
     };
-    if (!body.client_name || !body.redirect_uris) {
+    if (
+      typeof body.client_name !== 'string' ||
+      !body.client_name.trim() ||
+      body.client_name.length > 200 ||
+      !Array.isArray(body.redirect_uris) ||
+      body.redirect_uris.length === 0 ||
+      body.redirect_uris.length > 10
+    ) {
       ctx.status = 400;
       ctx.body = { error: 'invalid_client_metadata' };
       return;
     }
+    const allowedHosts = cfg.oauth.dcr.allowedRedirectHosts;
+    if (allowedHosts?.length) {
+      const bad = body.redirect_uris.find((u) => !isAllowedDcrRedirect(u, allowedHosts));
+      if (bad !== undefined) {
+        ctx.status = 400;
+        ctx.body = {
+          error: 'invalid_redirect_uri',
+          error_description: 'redirect_uri host is not allowed for self-registration',
+        };
+        return;
+      }
+    }
     const requestedScopes = parseScope(body.scope ?? '');
-    const grantedScopes: Scope[] =
-      requestedScopes.length > 0 ? requestedScopes : [...ALL_SCOPES];
+    const grantedScopes: Scope[] = requestedScopes.length > 0 ? requestedScopes : [...ALL_SCOPES];
 
     try {
       const { client, clientSecret } = await strapi
@@ -86,24 +107,39 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         token_endpoint_auth_method: client.tokenEndpointAuthMethod,
         ...(clientSecret ? { client_secret: clientSecret } : {}),
       };
-      strapi.plugin('mcp-server').service('audit').record({
-        ts: new Date(),
-        principalType: 'system',
-        principalId: 'anonymous',
-        clientId: client.clientId,
-        tool: 'oauth.dcr.register',
-        params: {
-          client_name: client.clientName,
-          redirect_uris: client.redirectUris,
-          scopes: client.scopes,
-        },
-        resultStatus: 'ok',
-        ip,
-        userAgent,
-      });
+      strapi
+        .plugin('mcp-server')
+        .service('audit')
+        .record({
+          ts: new Date(),
+          principalType: 'system',
+          principalId: 'anonymous',
+          clientId: client.clientId,
+          tool: 'oauth.dcr.register',
+          params: {
+            client_name: client.clientName,
+            redirect_uris: client.redirectUris,
+            scopes: client.scopes,
+          },
+          resultStatus: 'ok',
+          ip,
+          userAgent,
+        });
     } catch (err) {
       ctx.status = 400;
       ctx.body = { error: 'invalid_client_metadata', error_description: (err as Error).message };
     }
   },
 });
+
+function isAllowedDcrRedirect(uri: unknown, allowedHosts: string[]): boolean {
+  if (typeof uri !== 'string') return false;
+  try {
+    const u = new URL(uri);
+    const h = u.hostname.toLowerCase();
+    if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]') return true;
+    return allowedHosts.some((a) => a.toLowerCase() === h);
+  } catch {
+    return false;
+  }
+}

@@ -3,11 +3,11 @@
 import mcp from './mcp';
 import oauth from './oauth';
 import admin from './admin';
-import proxy from './proxy';
+import uploads from './uploads';
 
 export default {
   mcp,
-  proxy,
+  uploads,
   ...oauth,
   ...admin,
 };

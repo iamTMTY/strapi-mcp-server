@@ -56,6 +56,7 @@ export interface RefreshRow {
   rotatedTo: string | null;
   revoked: boolean;
   expiresAt: string;
+  familyExpiresAt: string | null;
 }
 
 export default ({ strapi }: { strapi: Core.Strapi }) => {
@@ -72,6 +73,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       scope: Scope[];
       familyId?: string;
       parentJti?: string;
+      /** Absolute family deadline carried over on rotation. */
+      familyExpiresAt?: Date | null;
     }): Promise<MintResult> {
       const cfg = getConfig(strapi);
       const key = await strapi.plugin('mcp-server').service('signing-keys').getActiveKey();
@@ -97,7 +100,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
       const refreshSecret = randomBytes(32).toString('base64url');
       const familyId = opts.familyId ?? randomBytes(16).toString('hex');
-      const refreshExp = new Date((now + cfg.oauth.refreshTokenTtlSec) * 1000);
+      // Rotation slides the refresh expiry forward, but never past the
+      // family's absolute deadline — otherwise a family lives forever.
+      const familyExpiresAt =
+        opts.familyExpiresAt ?? new Date((now + cfg.oauth.refreshFamilyMaxAgeSec) * 1000);
+      const refreshExp = new Date(
+        Math.min((now + cfg.oauth.refreshTokenTtlSec) * 1000, familyExpiresAt.getTime())
+      );
 
       await strapi.db.query(REFRESH_UID).create({
         data: {
@@ -110,6 +119,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
           revoked: false,
           rotatedTo: null,
           expiresAt: refreshExp,
+          familyExpiresAt,
         },
       });
 
@@ -159,10 +169,22 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         return null;
       }
       if (row.revoked || row.rotatedTo) {
-        // Reuse detection: nuke the whole family.
         await this.revokeFamily(row.familyId);
         strapi.log.warn(
           `[mcp-server] refresh-token reuse detected family=${row.familyId} client=${row.clientId} — family revoked`
+        );
+        return null;
+      }
+      // Atomic claim so two concurrent refreshes can't both rotate the same
+      // token. markRotated() later overwrites the placeholder with the new hash.
+      const { count } = await strapi.db.query(REFRESH_UID).updateMany({
+        where: { id: row.id, rotatedTo: { $null: true }, revoked: false },
+        data: { rotatedTo: `pending:${randomBytes(8).toString('hex')}` },
+      });
+      if (count !== 1) {
+        await this.revokeFamily(row.familyId);
+        strapi.log.warn(
+          `[mcp-server] concurrent refresh of one token family=${row.familyId} client=${row.clientId} — family revoked`
         );
         return null;
       }
@@ -221,10 +243,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   };
 };
 
-async function verifyEmbedded(
-  strapi: Core.Strapi,
-  token: string
-): Promise<VerifiedClaims> {
+async function verifyEmbedded(strapi: Core.Strapi, token: string): Promise<VerifiedClaims> {
   const sk = strapi.plugin('mcp-server').service('signing-keys');
   const jwks = createLocalJWKSet(await sk.publicJwks());
   const issuer = authorizationServerUrl(strapi);
@@ -259,10 +278,7 @@ async function verifyEmbedded(
   };
 }
 
-async function verifyExternal(
-  strapi: Core.Strapi,
-  token: string
-): Promise<VerifiedClaims> {
+async function verifyExternal(strapi: Core.Strapi, token: string): Promise<VerifiedClaims> {
   const cfg = getConfig(strapi);
   const ext = cfg.oauth.external;
   if (!ext) throw new Error('invalid_token');
@@ -272,7 +288,7 @@ async function verifyExternal(
   try {
     const { payload } = await jwtVerify(token, jwks, {
       issuer: ext.issuer,
-      // No audience check in external mode — external AS owns aud.
+      audience: ext.audience,
     });
     claims = payload;
   } catch (err) {
@@ -286,13 +302,18 @@ async function verifyExternal(
   if (typeof lookupValue !== 'string' || !lookupValue) {
     throw new Error('invalid_token');
   }
-  const adminWhere =
-    lookupClaim === 'email' ? { email: lookupValue } : { username: lookupValue };
-  const admin = (await strapi.db
-    .query('admin::user')
-    .findOne({ where: adminWhere })) as
-    | { id: number; isActive?: boolean; blocked?: boolean }
-    | null;
+  // An IdP that lets users set an unverified email would otherwise let them
+  // claim any Strapi admin's identity. Absent claim is tolerated (many IdPs
+  // only issue verified emails and omit it); explicit false is not.
+  if (lookupClaim === 'email' && (claims as Record<string, unknown>).email_verified === false) {
+    throw new Error('invalid_token');
+  }
+  const adminWhere = lookupClaim === 'email' ? { email: lookupValue } : { username: lookupValue };
+  const admin = (await strapi.db.query('admin::user').findOne({ where: adminWhere })) as {
+    id: number;
+    isActive?: boolean;
+    blocked?: boolean;
+  } | null;
   if (!admin || admin.isActive === false || admin.blocked) {
     throw new Error('invalid_token');
   }
@@ -310,9 +331,7 @@ async function verifyExternal(
   //  - enforceScopes: false (default) → grant the full surface, leaving
   //    granular control to Strapi RBAC + per-tool toggles. Keeps setup
   //    cross-IdP portable without per-vendor scope registration.
-  const scope: Scope[] = ext.enforceScopes
-    ? parseScope(claims.scope)
-    : [...ALL_SCOPES];
+  const scope: Scope[] = ext.enforceScopes ? parseScope(claims.scope) : [...ALL_SCOPES];
 
   return {
     sub: String(admin.id),

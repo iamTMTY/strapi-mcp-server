@@ -26,6 +26,7 @@
     },
     "resource": { "type": "string", "required": true, "maxLength": 2048 },
     "used": { "type": "boolean", "default": false, "required": true },
+    "familyId": { "type": "string", "maxLength": 64 },
     "expiresAt": { "type": "datetime", "required": true }
   }
 }

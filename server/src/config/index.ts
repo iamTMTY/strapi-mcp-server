@@ -8,24 +8,36 @@ export interface RateBucketConfig {
 }
 
 export interface McpConfig {
-  enabled: boolean;
   resourceUrl: string;
   allowedOrigins: string[];
   oauth: {
     mode: 'embedded' | 'external';
     accessTokenTtlSec: number;
     refreshTokenTtlSec: number;
+    /** Absolute lifetime of a refresh-token family; rotation can't extend past it. */
+    refreshFamilyMaxAgeSec: number;
     authCodeTtlSec: number;
     ssoCookieTtlSec: number;
     dcr: {
       enabled: boolean;
       ratelimitPerHour: number;
+      /**
+       * Optional allowlist of hosts DCR clients may redirect to (loopback is
+       * always allowed). E.g. `['claude.ai', 'chatgpt.com']`. Unset = any
+       * https host, with the consent screen as the only gate.
+       */
+      allowedRedirectHosts?: string[];
     };
     consent: { rememberDays: number };
     introspection: { allowedIps: string[] };
     external?: {
       issuer: string;
       jwksUri: string;
+      /**
+       * Required `aud` value (or values). Without it, any token the IdP minted
+       * for any other application would be accepted here.
+       */
+      audience: string | string[];
       /** JWT claim used to look up the matching Strapi admin user. Default: 'email'. */
       adminLookupClaim?: string;
       /**
@@ -40,13 +52,6 @@ export interface McpConfig {
       enforceScopes?: boolean;
     };
   };
-  session: {
-    idleTtlMs: number;
-    hardTtlMs: number;
-    maxPerPrincipal: number;
-    maxTotal: number;
-    sweepIntervalMs: number;
-  };
   rateLimit: {
     perPrincipal: RateBucketConfig;
     perIp: RateBucketConfig;
@@ -55,59 +60,40 @@ export interface McpConfig {
     maxBytes: number;
     mimeAllowlist: string[];
     allowSvg: boolean;
+    /** Lifetime of a one-time upload URL from strapi_media_request_upload. */
+    ticketTtlSec: number;
   };
   audit: {
     retentionDays: number;
     redactKeyPatterns: string[];
     drainIntervalMs: number;
     drainBatchSize: number;
+    /** Record successful read-only tool calls too. Errors and writes are always recorded. */
+    recordReads: boolean;
   };
   tools: { enabled: Record<string, boolean> };
+  /** Upper bound for a single tool call; the model gets a `timeout` error past it. */
+  requestTimeoutMs: number;
   /**
-   * Optional Redis backend for horizontal scale. When `enabled: false`
-   * (default), the plugin uses process-local state and is single-instance.
-   *
-   * Two opt-in tiers:
-   *  - `enabled: true` alone shares only the rate limiter buckets across
-   *    instances. Sessions stay process-local — sticky LB is still required.
-   *  - `enabled: true` + `internalAddress` + `internalSecret` adds session
-   *    routing: any instance can serve any session by proxying to the owner.
+   * Optional Redis, used only to share rate-limit buckets across instances.
+   * The MCP transport is stateless, so any instance can serve any request —
+   * no sticky sessions or session routing needed.
    */
   redis?: {
     enabled: boolean;
     url: string;
     keyPrefix?: string;
-    /** Override the auto-generated instance id (default: `${host}-${pid}-${rand}`). */
-    instanceId?: string;
-    /**
-     * Internal-facing URL of this instance (e.g. `http://10.0.0.5:1337`).
-     * Peers use this address to proxy requests for sessions this instance owns.
-     * When unset, session routing is disabled and Redis is only used for rate
-     * limiting.
-     */
-    internalAddress?: string;
-    /**
-     * Shared secret used to sign cross-instance proxy requests. Required when
-     * `internalAddress` is set. Must be at least 32 characters of high-entropy
-     * randomness — peers that don't share this secret cannot reach any
-     * session on this instance.
-     */
-    internalSecret?: string;
-    /** How often each instance refreshes its heartbeat key. Default 10s. */
-    heartbeatIntervalMs?: number;
-    /** TTL of the heartbeat key. Must be > intervalMs. Default 30s. */
-    heartbeatTtlMs?: number;
   };
 }
 
 const defaultConfig: McpConfig = {
-  enabled: false,
   resourceUrl: '',
   allowedOrigins: [],
   oauth: {
     mode: 'embedded',
     accessTokenTtlSec: 600,
     refreshTokenTtlSec: 86400,
+    refreshFamilyMaxAgeSec: 30 * 86400,
     authCodeTtlSec: 60,
     ssoCookieTtlSec: 900,
     // DCR off by default — admins create clients via the Clients page in the
@@ -122,13 +108,6 @@ const defaultConfig: McpConfig = {
     consent: { rememberDays: 0 },
     introspection: { allowedIps: ['127.0.0.1', '::1'] },
   },
-  session: {
-    idleTtlMs: 30 * 60 * 1000,
-    hardTtlMs: 24 * 60 * 60 * 1000,
-    maxPerPrincipal: 10,
-    maxTotal: 1000,
-    sweepIntervalMs: 60 * 1000,
-  },
   rateLimit: {
     perPrincipal: { capacity: 60, refillPerSec: 1 },
     perIp: { capacity: 120, refillPerSec: 2 },
@@ -137,14 +116,17 @@ const defaultConfig: McpConfig = {
     maxBytes: 10 * 1024 * 1024,
     mimeAllowlist: ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'],
     allowSvg: false,
+    ticketTtlSec: 600,
   },
   audit: {
     retentionDays: 90,
     redactKeyPatterns: ['password', 'token', 'secret', 'authorization', 'cookie', 'apikey'],
     drainIntervalMs: 2000,
     drainBatchSize: 50,
+    recordReads: true,
   },
   tools: { enabled: {} },
+  requestTimeoutMs: 60_000,
 };
 
 /**
@@ -156,13 +138,12 @@ const defaultConfig: McpConfig = {
  */
 function validator(config: McpConfig): void {
   if (!config) throw new Error('[mcp-server] config is missing');
-  if (typeof config.enabled !== 'boolean') {
-    throw new Error('[mcp-server] config.enabled must be a boolean');
-  }
-  if (!config.enabled) return;
+  // Unconfigured = installed but inactive (see isConfigured). Everything
+  // below applies once the operator opts in by setting resourceUrl.
+  if (!isConfigured(config)) return;
 
-  if (!config.resourceUrl || typeof config.resourceUrl !== 'string') {
-    throw new Error('[mcp-server] config.resourceUrl is required when enabled');
+  if (typeof config.resourceUrl !== 'string') {
+    throw new Error('[mcp-server] config.resourceUrl must be a string');
   }
   try {
     // throws on invalid URL
@@ -206,6 +187,15 @@ function validator(config: McpConfig): void {
   if (config.oauth.refreshTokenTtlSec < 300) {
     throw new Error('[mcp-server] oauth.refreshTokenTtlSec must be >= 300');
   }
+  if (!(config.requestTimeoutMs >= 1000 && config.requestTimeoutMs <= 600_000)) {
+    throw new Error('[mcp-server] requestTimeoutMs must be between 1000 and 600000');
+  }
+  if (config.upload.ticketTtlSec < 60 || config.upload.ticketTtlSec > 3600) {
+    throw new Error('[mcp-server] upload.ticketTtlSec must be between 60 and 3600');
+  }
+  if (config.oauth.refreshFamilyMaxAgeSec < config.oauth.refreshTokenTtlSec) {
+    throw new Error('[mcp-server] oauth.refreshFamilyMaxAgeSec must be >= refreshTokenTtlSec');
+  }
   if (config.oauth.authCodeTtlSec < 10 || config.oauth.authCodeTtlSec > 600) {
     throw new Error('[mcp-server] oauth.authCodeTtlSec must be between 10 and 600');
   }
@@ -220,37 +210,8 @@ function validator(config: McpConfig): void {
     } catch {
       throw new Error('[mcp-server] redis.url is not a valid URL (expected redis:// or rediss://)');
     }
-    if (
-      !config.redis.url.startsWith('redis://') &&
-      !config.redis.url.startsWith('rediss://')
-    ) {
+    if (!config.redis.url.startsWith('redis://') && !config.redis.url.startsWith('rediss://')) {
       throw new Error('[mcp-server] redis.url must start with redis:// or rediss://');
-    }
-
-    if (config.redis.internalAddress || config.redis.internalSecret) {
-      if (!config.redis.internalAddress) {
-        throw new Error(
-          '[mcp-server] redis.internalAddress is required when redis.internalSecret is set'
-        );
-      }
-      if (!config.redis.internalSecret) {
-        throw new Error(
-          '[mcp-server] redis.internalSecret is required when redis.internalAddress is set'
-        );
-      }
-      try {
-        const u = new URL(config.redis.internalAddress);
-        if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-          throw new Error('protocol');
-        }
-      } catch {
-        throw new Error('[mcp-server] redis.internalAddress must be a valid http(s) URL');
-      }
-      if (config.redis.internalSecret.length < 32) {
-        throw new Error(
-          '[mcp-server] redis.internalSecret must be at least 32 characters of random data'
-        );
-      }
     }
   }
 
@@ -261,6 +222,12 @@ function validator(config: McpConfig): void {
     if (!config.oauth.external.issuer || !config.oauth.external.jwksUri) {
       throw new Error(
         '[mcp-server] oauth.external.issuer and oauth.external.jwksUri are required when oauth.mode is "external"'
+      );
+    }
+    const aud = config.oauth.external.audience;
+    if (!aud || (Array.isArray(aud) && aud.length === 0)) {
+      throw new Error(
+        '[mcp-server] oauth.external.audience is required when oauth.mode is "external" — set it to the audience your IdP puts in tokens issued for this MCP server'
       );
     }
     try {
@@ -284,6 +251,15 @@ export default {
     validator(config);
   },
 };
+
+/**
+ * The plugin serves nothing until `resourceUrl` is set: installing it from npm
+ * (which Strapi auto-enables) must not expose OAuth or MCP endpoints. To turn
+ * a configured plugin off, use Strapi's own `'mcp-server': { enabled: false }`.
+ */
+export function isConfigured(config: Pick<McpConfig, 'resourceUrl'> | undefined): boolean {
+  return !!config?.resourceUrl;
+}
 
 export function getConfig(strapi: Core.Strapi): McpConfig {
   return strapi.config.get('plugin::mcp-server') as McpConfig;

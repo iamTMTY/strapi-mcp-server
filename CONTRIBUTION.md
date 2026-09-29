@@ -46,7 +46,8 @@ npm run inspect
 This opens the inspector against `http://localhost:1337/mcp`. Walk:
 
 - OAuth discovery → registration (DCR if enabled) → authorize → consent → token
-- `initialize` → `list_tools` → call each tool
+- `tools/list` → call each tool (the transport is stateless: no session id,
+  every POST is authorized on its own)
 - Confirm RBAC-denied calls return `{error: "forbidden", ...}` with the
   user-facing message
 
@@ -57,13 +58,19 @@ client-by-client connect snippets.
 
 ```bash
 npm run test              # unit only (default — fast)
-npm run test:integration  # spawns the fixture Strapi via @strapi/strapi/testing
+npm run build && npm run test-app:build
+npm run test:integration  # spawns the fixture Strapi (`npm run start`) on :11337
 npm run test:all          # both
 ```
 
 Unit tests use a mock `strapi` object (see `__tests__/helpers/strapi-mock.ts`).
-Integration tests boot the fixture app on a random port and hit it over
-HTTP with `undici`.
+Integration tests boot the fixture app with a throwaway sqlite DB and hit it
+over HTTP with `undici`. They create a super-admin and an Author-role admin
+(`ensureRoleUser`), so RBAC conditions, field and locale permissions and
+relation checks are exercised against real Strapi. If you change the fixture's
+content types, re-run `npm run test-app:build` and make sure it compiles —
+otherwise `dist/config` goes stale. `npm rebuild better-sqlite3` fixes
+"Could not locate the bindings file".
 
 When you add a feature:
 
@@ -73,7 +80,9 @@ When you add a feature:
   end-to-end (e.g. a new endpoint, a discovery field). Pure unit coverage
   is fine if it's internal.
 - **Tool change** → both: unit-test the handler logic, integration-test
-  the scope and RBAC enforcement.
+  the scope and RBAC enforcement (including as the Author role). Define tools
+  with `defineTool` and give them a `title`, annotations and a `requires`
+  capability; tool input schemas are zod v4.
 - **Schema change** → add a fixture in the integration test if it affects
   query shape; otherwise unit-test the normalizer.
 
@@ -87,12 +96,15 @@ broken the contract; bump version and document it.
 - Services exported as `({ strapi }) => ({ method() {...} })` factories —
   Strapi conventional shape. Don't reach into other plugins' internals;
   use the documented `strapi.service('admin::X')` namespace.
-- Routes use `auth: false` and chain plugin policies (`origin`,
+- Routes use `auth: false` and chain plugin policies (`configured`, `origin`,
   `authenticate`, `rateLimit`) — never disable a policy to "make it work."
+- Permission checks go through Strapi's own `permission-checker` / upload
+  permissions manager (see `CLAUDE.md` → "RBAC in tools") — never compare
+  action strings by hand.
 - Errors thrown from tool handlers carry a stable `.code` (machine-readable)
   and a user-facing `.message` (no UID, no workarounds, no internal jargon).
 - No new dependencies without a reason. We bias toward the standard library
-  and the four runtime deps already in `package.json`.
+  and the runtime deps already in `package.json`.
 - Run `npm run format` before committing — Prettier handles layout.
 
 ## CI

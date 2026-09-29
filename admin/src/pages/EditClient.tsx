@@ -13,13 +13,13 @@ import {
 import { ArrowLeft } from '@strapi/icons';
 import { useMcpApi } from '../lib/api';
 import { PageHeader } from '../components/PageHeader';
+import {
+  ALL_SCOPES as SERVER_SCOPES,
+  SCOPE_LABELS,
+} from '../../../server/src/services/oauth/scopes';
 
-const ALL_SCOPES = [
-  { id: 'strapi:content:read', label: 'Read content (list types, schemas, entries)' },
-  { id: 'strapi:content:write', label: 'Create / update content entries (draft only)' },
-  { id: 'strapi:media:read', label: 'List media files' },
-  { id: 'strapi:media:write', label: 'Upload media files' },
-];
+// Single source of truth shared with the server (consent screen, validation).
+const ALL_SCOPES = SERVER_SCOPES.map((id) => ({ id, label: SCOPE_LABELS[id] }));
 
 interface Client {
   clientId: string;
@@ -99,9 +99,7 @@ export function EditClient(): JSX.Element {
       <Box>
         <PageHeader title="Edit client" />
         <Box background="danger100" padding={4} hasRadius>
-          <Typography textColor="danger700">
-            {error ?? 'Client not found'}
-          </Typography>
+          <Typography textColor="danger700">{error ?? 'Client not found'}</Typography>
         </Box>
       </Box>
     );
@@ -141,9 +139,7 @@ export function EditClient(): JSX.Element {
                   <TextInput
                     name="clientName"
                     value={name}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setName(e.target.value)
-                    }
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                   />
                 </Box>
               </Box>

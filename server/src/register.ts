@@ -1,7 +1,8 @@
 'use strict';
 
 import type { Core } from '@strapi/strapi';
-import { getConfig } from './config';
+import { getConfig, isConfigured } from './config';
+import { uploadSizeGuard } from './controllers/uploads';
 
 /**
  * Runs once at Strapi init, before bootstrap. Validates config again as a
@@ -11,9 +12,12 @@ import { getConfig } from './config';
 export async function register({ strapi }: { strapi: Core.Strapi }): Promise<void> {
   const cfg = getConfig(strapi);
 
-  if (!cfg.enabled) {
-    strapi.log.info('[mcp-server] plugin disabled — skipping registration');
-    return;
+  // Admin permissions are registered even when unconfigured, so the admin
+  // pages can load and say so.
+  if (!isConfigured(cfg)) {
+    strapi.log.warn(
+      '[mcp-server] not configured (no resourceUrl) — /mcp and /oauth/* will return 404 until it is set'
+    );
   }
 
   // Three permissions, each gating a distinct slice of the admin API:
@@ -22,6 +26,10 @@ export async function register({ strapi }: { strapi: Core.Strapi }): Promise<voi
   //   clients.manage → OAuth client CRUD
   // Settings has no "manage" because mutations happen in config/plugins.ts —
   // the admin UI is view-only.
+  // Before Strapi's body parser (register precedes middleware init), so an
+  // oversized one-time upload is refused before anything hits disk.
+  strapi.server.use(uploadSizeGuard(strapi));
+
   const actionProvider = strapi.service('admin::permission').actionProvider;
   await actionProvider.registerMany([
     {

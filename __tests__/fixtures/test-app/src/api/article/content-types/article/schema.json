@@ -22,6 +22,15 @@
     "slug": {
       "type": "uid",
       "targetField": "title"
+    },
+    "category": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::category.category"
+    },
+    "blocks": {
+      "type": "dynamiczone",
+      "components": ["blocks.cta", "blocks.quote"]
     }
   }
 }

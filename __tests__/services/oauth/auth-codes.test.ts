@@ -20,11 +20,38 @@ function makeAuthCodes(rows: AuthCodeRow[] = []) {
       }
       return null;
     }),
-    update: jest.fn(async ({ where, data }: { where: { id: number; used?: boolean }; data: Partial<AuthCodeRow> }) => {
-      const row = rows.find((r) => r.id === where.id && (where.used === undefined || r.used === where.used));
-      if (row) Object.assign(row, data);
-      return row;
-    }),
+    update: jest.fn(
+      async ({
+        where,
+        data,
+      }: {
+        where: { id: number; used?: boolean };
+        data: Partial<AuthCodeRow>;
+      }) => {
+        const row = rows.find(
+          (r) => r.id === where.id && (where.used === undefined || r.used === where.used)
+        );
+        if (row) Object.assign(row, data);
+        return row;
+      }
+    ),
+    updateMany: jest.fn(
+      async ({
+        where,
+        data,
+      }: {
+        where: { id: number; used?: boolean };
+        data: Partial<AuthCodeRow>;
+      }) => {
+        // Yield first so concurrent consumers interleave like real DB calls.
+        await Promise.resolve();
+        const matches = rows.filter(
+          (r) => r.id === where.id && (where.used === undefined || r.used === where.used)
+        );
+        matches.forEach((r) => Object.assign(r, data));
+        return { count: matches.length };
+      }
+    ),
   });
   const strapi = makeStrapi({
     query: { 'plugin::mcp-server.oauth-auth-code': query },
@@ -80,6 +107,20 @@ describe('auth-codes.consume', () => {
     });
     await svc.consume(code);
     expect(await svc.consume(code)).toBe('replayed');
+  });
+
+  it('lets exactly one of two concurrent consumers win', async () => {
+    const { svc } = makeAuthCodes();
+    const code = await svc.issue({
+      clientId: 'cid',
+      adminUserId: '1',
+      scope: 'strapi:content:read',
+      redirectUri: 'http://localhost/callback',
+      codeChallenge: 'cc',
+      resource: 'http://localhost:1337/mcp',
+    });
+    const results = await Promise.all([svc.consume(code), svc.consume(code)]);
+    expect(results.filter((r) => r && r !== 'replayed')).toHaveLength(1);
   });
 
   it('returns null for unknown code', async () => {

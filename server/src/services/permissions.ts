@@ -5,22 +5,55 @@ import type { Core } from '@strapi/strapi';
 const INTERNAL_UID =
   /^(admin::|strapi::|plugin::users-permissions\.(role|permission)|plugin::i18n\.locale|plugin::upload\.(folder|file)$|plugin::mcp-server\.)/;
 
+export const FILE_UID = 'plugin::upload.file';
+
+export const UPLOAD_ACTIONS = {
+  read: 'plugin::upload.read',
+  create: 'plugin::upload.assets.create',
+  update: 'plugin::upload.assets.update',
+} as const;
+
 export interface PrincipalContext {
-  user: { id: number | string; isActive?: boolean };
-  permissions: unknown[];
+  user: { id: number | string; isActive?: boolean; roles?: unknown[] };
   isSuperAdmin: boolean;
+  /** CASL ability, generated lazily once per request (see getAbility). */
+  ability?: unknown;
 }
+
+/**
+ * The subset of content-manager's permission-checker the tools use. It is
+ * Strapi's own enforcement: conditions ("is creator"), field-level and
+ * locale permissions, plus private-field stripping on input and output.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export interface ContentChecker {
+  can: Record<string, (entity?: unknown, field?: string) => boolean>;
+  cannot: Record<string, (entity?: unknown, field?: string) => boolean>;
+  sanitizeOutput: (data: unknown) => Promise<any>;
+  sanitizeCreateInput: (data: unknown) => Promise<any>;
+  sanitizeUpdateInput: (entity: unknown) => (data: unknown) => Promise<any>;
+  validateQuery: (query: unknown, opts?: { action?: string }) => Promise<void>;
+  sanitizedQuery: Record<string, (query: unknown) => Promise<any>>;
+}
+
+export interface UploadPermissionsManager {
+  isAllowed: boolean;
+  action: string;
+  ability: { cannot: (action: string, subject: unknown) => boolean };
+  toSubject: (entity: unknown) => unknown;
+  sanitizeQuery: (query: unknown) => Promise<any>;
+  addPermissionsQueryTo: (query: unknown) => any;
+  sanitizeOutput: (data: unknown, opts?: { action?: string }) => Promise<any>;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   /**
-   * Load an admin user and their permissions. Used both at JWT verification time
-   * (to confirm the principal still exists and is active) and at tool-call time
-   * for RBAC enforcement.
+   * Load an admin user with roles. Called on every authenticated request, so
+   * deactivation, blocking and role changes take effect immediately.
    *
    * We bypass `admin::user.findOne(...)` because its `populate: ['roles']` path
-   * triggered a Knex "Undefined binding" error in some Strapi installs. Going
-   * direct to `strapi.db.query` is more predictable and gives us exactly the
-   * shape we need (user with roles relation).
+   * triggered a Knex "Undefined binding" error in some Strapi installs.
    */
   async loadPrincipal(adminUserId: string | number): Promise<PrincipalContext | null> {
     const id = typeof adminUserId === 'string' ? Number(adminUserId) || adminUserId : adminUserId;
@@ -31,50 +64,46 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     });
     if (!user || user.isActive === false || user.blocked) return null;
 
-    const roleSvc = strapi.service('admin::role');
     let isSuperAdmin = false;
     try {
-      isSuperAdmin = (await roleSvc.hasSuperAdminRole(user)) === true;
+      isSuperAdmin = (await strapi.service('admin::role').hasSuperAdminRole(user)) === true;
     } catch {
-      // Fallback: check role code locally.
       isSuperAdmin =
         Array.isArray(user.roles) &&
         user.roles.some((r: { code?: string }) => r.code === 'strapi-super-admin');
     }
-
-    const permSvc = strapi.service('admin::permission');
-    let permissions: unknown[] = [];
-    try {
-      // Strapi v5 signature: findUserPermissions(user) — pass the user object
-      // directly, NOT wrapped in `{ user }`. Wrapping makes `user.id` resolve
-      // to undefined inside the query, producing "Undefined binding ... t4.id"
-      // Knex errors. Super-admins short-circuited above so this only bites
-      // non-super-admin roles, masquerading as "no permissions found."
-      permissions = await permSvc.findUserPermissions(user);
-    } catch (err) {
-      strapi.log.warn('[mcp-server] findUserPermissions failed', err as Error);
-    }
-
-    return { user, permissions, isSuperAdmin };
+    return { user, isSuperAdmin };
   },
 
-  /**
-   * Content-manager-equivalent RBAC check for a UID + action.
-   * action: 'read' | 'create' | 'update' | 'delete' | 'publish'
-   * Internal UIDs are denied outright regardless of role.
-   */
-  async canActionOnUid(
-    principal: PrincipalContext,
-    uid: string,
-    action: 'read' | 'create' | 'update' | 'delete' | 'publish'
-  ): Promise<boolean> {
-    if (INTERNAL_UID.test(uid)) return false;
-    if (principal.isSuperAdmin) return true;
+  /** Strapi's CASL ability for the principal. Memoised on the (per-request) principal. */
+  async getAbility(principal: PrincipalContext): Promise<unknown> {
+    if (!principal.ability) {
+      principal.ability = await strapi
+        .service('admin::permission')
+        .engine.generateUserAbility(principal.user);
+    }
+    return principal.ability;
+  },
 
-    const actionId = `plugin::content-manager.explorer.${action}`;
-    return (principal.permissions as Array<{ action: string; subject: string | null }>).some(
-      (p) => p.action === actionId && (p.subject === uid || p.subject === null)
-    );
+  /** content-manager permission-checker for a UID. Internal UIDs are refused outright. */
+  async contentChecker(principal: PrincipalContext, uid: string): Promise<ContentChecker> {
+    if (INTERNAL_UID.test(uid)) throw forbidden();
+    const userAbility = await this.getAbility(principal);
+    return strapi
+      .plugin('content-manager')
+      .service('permission-checker')
+      .create({ userAbility, model: uid }) as ContentChecker;
+  },
+
+  /** Upload-plugin permissions manager, the same one the Media Library admin API uses. */
+  async uploadManager(
+    principal: PrincipalContext,
+    action: (typeof UPLOAD_ACTIONS)[keyof typeof UPLOAD_ACTIONS]
+  ): Promise<UploadPermissionsManager> {
+    const ability = await this.getAbility(principal);
+    return strapi
+      .service('admin::permission')
+      .createPermissionsManager({ ability, action, model: FILE_UID }) as UploadPermissionsManager;
   },
 
   isInternalUid(uid: string): boolean {
@@ -91,3 +120,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     );
   },
 });
+
+export function forbidden(): Error {
+  const err = new Error('You do not have permission to access this content.');
+  (err as Error & { code?: string }).code = 'forbidden';
+  return err;
+}

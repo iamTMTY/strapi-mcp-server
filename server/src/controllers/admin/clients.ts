@@ -33,17 +33,22 @@ async function enrichWithUsers(
   if (ids.length === 0) {
     return clients.map(() => ({ ownerAdmin: null, createdByAdmin: null }));
   }
-  const users = (await strapi.db
-    .query('admin::user')
-    .findMany({
-      where: { id: { $in: ids } },
-      select: ['id', 'email', 'firstname', 'lastname', 'username'],
-    })) as AdminUserRow[];
+  const users = (await strapi.db.query('admin::user').findMany({
+    where: { id: { $in: ids } },
+    select: ['id', 'email', 'firstname', 'lastname', 'username'],
+  })) as AdminUserRow[];
   const byId = new Map(users.map((u) => [String(u.id), u]));
   return clients.map((c) => ({
-    ownerAdmin: c.ownerAdminId ? byId.get(c.ownerAdminId) ?? null : null,
-    createdByAdmin: c.createdByAdminId ? byId.get(c.createdByAdminId) ?? null : null,
+    ownerAdmin: c.ownerAdminId ? (byId.get(c.ownerAdminId) ?? null) : null,
+    createdByAdmin: c.createdByAdminId ? (byId.get(c.createdByAdminId) ?? null) : null,
   }));
+}
+
+/** Never ship the secret hash to the browser. */
+function publicView<T extends Record<string, unknown>>(row: T): Omit<T, 'clientSecretHash'> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { clientSecretHash, ...rest } = row;
+  return rest;
 }
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
@@ -52,7 +57,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const enriched = await enrichWithUsers(strapi, clients);
     ctx.body = {
       clients: clients.map((c: Record<string, unknown>, i: number) => ({
-        ...c,
+        ...publicView(c),
         ownerAdmin: enriched[i].ownerAdmin,
         createdByAdmin: enriched[i].createdByAdmin,
       })),
@@ -73,8 +78,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       return;
     }
     const adminUser = ctx.state.user as { id: number | string } | undefined;
-    const authCredentials =
-      (ctx.state.auth as { credentials?: { id?: number | string } } | undefined)?.credentials;
+    const authCredentials = (
+      ctx.state.auth as { credentials?: { id?: number | string } } | undefined
+    )?.credentials;
     // Prefer ctx.state.user; fall back to auth.credentials in case the admin
     // strategy populated only the latter.
     const createdByAdminId =
@@ -84,7 +90,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
           ? String(authCredentials.id)
           : undefined;
     const scopes = parseScope(
-      Array.isArray(body.scopes) ? body.scopes.join(' ') : body.scopes ?? ''
+      Array.isArray(body.scopes) ? body.scopes.join(' ') : (body.scopes ?? '')
     );
     try {
       // ownerAdminId is intentionally not set here — it represents the consent
@@ -96,7 +102,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         isConfidential: !!body.isConfidential,
         createdByAdminId,
       });
-      ctx.body = result; // client_secret returned once
+      ctx.body = { ...result, client: publicView(result.client) }; // client_secret returned once
     } catch (err) {
       ctx.status = 400;
       ctx.body = { error: (err as Error).message };
@@ -118,7 +124,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     }
     const updated = await strapi.plugin('mcp-server').service('clients').update(clientId, patch);
     if (!updated) ctx.throw(404, 'not found');
-    ctx.body = updated;
+    ctx.body = publicView(updated);
   },
 
   async findOne(ctx: Context): Promise<void> {
@@ -133,10 +139,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       if (!row) {
         ctx.throw(404, 'not found');
       }
-      ctx.body = row;
+      ctx.body = publicView(row);
       return;
     }
-    ctx.body = client;
+    ctx.body = publicView(client);
   },
 
   async destroy(ctx: Context): Promise<void> {

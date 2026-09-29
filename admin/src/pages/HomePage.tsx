@@ -50,10 +50,9 @@ interface RecentCall {
 }
 
 interface Overview {
-  enabled: boolean;
+  configured: boolean;
   resourceUrl: string;
   allowedOrigins: string[];
-  sessions: { total: number; byPrincipal: Record<string, number> };
   recentCalls: RecentCall[];
   oauth: { mode: string; dcrEnabled: boolean };
 }
@@ -92,13 +91,7 @@ function StatRow({ label, value }: { label: string; value: React.ReactNode }): J
   );
 }
 
-function DetailRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}): JSX.Element {
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
   return (
     <Box paddingBottom={4}>
       <Typography variant="sigma" textColor="neutral600">
@@ -124,7 +117,7 @@ export function HomePage(): JSX.Element {
 
   return (
     <Box>
-      <PageHeader title="Overview" subtitle="Server status, sessions, and recent activity" />
+      <PageHeader title="Overview" subtitle="Server status and recent activity" />
 
       {error && (
         <Box background="danger100" padding={4} hasRadius marginBottom={6}>
@@ -142,31 +135,20 @@ export function HomePage(): JSX.Element {
                 <StatRow
                   label="State"
                   value={
-                    <Badge backgroundColor={data.enabled ? 'success100' : 'danger100'}>
-                      {data.enabled ? 'Enabled' : 'Disabled'}
+                    <Badge backgroundColor={data.configured ? 'success100' : 'danger100'}>
+                      {data.configured ? 'Active' : 'Not configured'}
                     </Badge>
                   }
                 />
               </Grid.Item>
               <Grid.Item col={5} s={6} xs={12} direction="column" alignItems="flex-start">
-                <StatRow
-                  label="Resource URL"
-                  value={data.resourceUrl || '(not configured)'}
-                />
+                <StatRow label="Resource URL" value={data.resourceUrl || '(not configured)'} />
               </Grid.Item>
               <Grid.Item col={2} s={6} xs={12} direction="column" alignItems="flex-start">
                 <StatRow label="OAuth mode" value={data.oauth.mode} />
               </Grid.Item>
               <Grid.Item col={2} s={6} xs={12} direction="column" alignItems="flex-start">
                 <StatRow label="DCR" value={data.oauth.dcrEnabled ? 'enabled' : 'disabled'} />
-              </Grid.Item>
-            </Grid.Root>
-          </Card>
-
-          <Card title="Sessions">
-            <Grid.Root gap={6}>
-              <Grid.Item col={3} s={6} xs={12} direction="column" alignItems="flex-start">
-                <StatRow label="Active total" value={String(data.sessions.total)} />
               </Grid.Item>
             </Grid.Root>
           </Card>
@@ -222,9 +204,7 @@ export function HomePage(): JSX.Element {
                       </Typography>
                     </Td>
                     <Td>
-                      <Badge
-                        backgroundColor={c.resultStatus === 'ok' ? 'success100' : 'danger100'}
-                      >
+                      <Badge backgroundColor={c.resultStatus === 'ok' ? 'success100' : 'danger100'}>
                         {c.resultStatus}
                       </Badge>
                     </Td>
@@ -263,10 +243,7 @@ export function HomePage(): JSX.Element {
         </Flex>
       )}
 
-      <Modal.Root
-        open={selected !== null}
-        onOpenChange={(open) => !open && setSelected(null)}
-      >
+      <Modal.Root open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         <Modal.Content>
           <Modal.Header>
             <Modal.Title>Audit entry</Modal.Title>
@@ -275,9 +252,7 @@ export function HomePage(): JSX.Element {
             {selected && (
               <Box paddingTop={2}>
                 <DetailRow label="Time">
-                  <Typography variant="omega">
-                    {new Date(selected.ts).toLocaleString()}
-                  </Typography>
+                  <Typography variant="omega">{new Date(selected.ts).toLocaleString()}</Typography>
                 </DetailRow>
                 <DetailRow label="Tool">
                   <Typography variant="omega" fontWeight="semiBold">
@@ -286,9 +261,7 @@ export function HomePage(): JSX.Element {
                 </DetailRow>
                 <DetailRow label="Status">
                   <Badge
-                    backgroundColor={
-                      selected.resultStatus === 'ok' ? 'success100' : 'danger100'
-                    }
+                    backgroundColor={selected.resultStatus === 'ok' ? 'success100' : 'danger100'}
                   >
                     {selected.resultStatus}
                   </Badge>

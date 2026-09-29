@@ -60,12 +60,17 @@ async function getAdminToken(): Promise<string | null> {
   }
 }
 
+/** Same-origin path only — never follow `javascript:`, absolute or `//host` URLs. */
+const isSafeLocalPath = (p: unknown): p is string =>
+  typeof p === 'string' && p.startsWith('/') && !p.startsWith('//') && !p.startsWith('/\\');
+
 export function SsoBridge(): JSX.Element {
   const [params] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const next = params.get('next') ?? '/admin';
+    const rawNext = params.get('next');
+    const next = isSafeLocalPath(rawNext) ? rawNext : '/admin';
     (async () => {
       const token = await getAdminToken();
       if (!token) {
@@ -81,7 +86,7 @@ export function SsoBridge(): JSX.Element {
         });
         if (!resp.ok) throw new Error(`handoff failed: ${resp.status}`);
         const data = (await resp.json()) as { next?: string };
-        window.location.replace(data.next ?? next);
+        window.location.replace(isSafeLocalPath(data.next) ? data.next : next);
       } catch (err) {
         setError((err as Error).message);
       }

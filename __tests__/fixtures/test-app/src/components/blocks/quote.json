@@ -1,0 +1,8 @@
+{
+  "collectionName": "components_blocks_quotes",
+  "info": { "displayName": "Quote" },
+  "options": {},
+  "attributes": {
+    "text": { "type": "text" }
+  }
+}

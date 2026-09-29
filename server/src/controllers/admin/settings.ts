@@ -9,19 +9,12 @@ import { getConfig } from '../../config';
  * happen in config/plugins.ts (env-driven) — exposing a runtime mutation surface
  * would let admins weaken security from the UI without an audit trail.
  *
- * Secrets (redis.internalSecret, password in redis.url) are masked. The UI
- * surfaces whether they're set, not what they're set to.
+ * The password in redis.url is masked.
  */
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   async get(ctx: Context): Promise<void> {
     const cfg = getConfig(strapi);
-    const redis = cfg.redis
-      ? {
-          ...cfg.redis,
-          url: maskRedisUrl(cfg.redis.url),
-          internalSecret: cfg.redis.internalSecret ? '••••••' : '',
-        }
-      : undefined;
+    const redis = cfg.redis ? { ...cfg.redis, url: maskRedisUrl(cfg.redis.url) } : undefined;
     ctx.body = { ...cfg, redis };
   },
 });
