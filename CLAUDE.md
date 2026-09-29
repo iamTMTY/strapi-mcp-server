@@ -126,7 +126,9 @@ __tests__/                     # unit tests by area + integration/ against the f
 - `mcp_admin_sso` is bound to the admin's Strapi session id and re-checked on
   every verify, so admin logout kills it.
 - Media: URL fetches block non-public addresses at socket lookup time
-  (rebinding-safe) and on every redirect; uploads need matching MIME,
+  (rebinding-safe) and on every redirect; IPv6 forms embedding an IPv4
+  address (mapped, compatible, NAT64, 6to4) are judged by that IPv4 address
+  (`embeddedIPv4`) rather than trusting `BlockList`'s mapped handling; uploads need matching MIME,
   extension and magic bytes; SVG off by default; provider SDK errors map to
   `upload_provider_error`.
 - One-time upload tickets: 32 random bytes, stored as SHA-256, single-use,

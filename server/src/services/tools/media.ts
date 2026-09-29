@@ -845,17 +845,63 @@ for (const [net, prefix] of [
   ['fc00::', 7],
   ['fe80::', 10],
   ['ff00::', 8],
+  ['100::', 64], // discard-only
+  ['2001::', 32], // Teredo: tunnels to an obfuscated IPv4 — block outright
+  ['2001:db8::', 32], // documentation
+  ['64:ff9b:1::', 48], // local-use NAT64 (RFC 8215): translates into private space
 ] as const) {
   blocked.addSubnet(net, prefix, 'ipv6');
 }
 
+/** 16 bytes of an IPv6 address (any textual form: `::`, embedded dotted quad, zone id). */
+function ipv6Bytes(address: string): number[] | null {
+  let addr = address.replace(/%.*$/, '').toLowerCase();
+  const dotted = /(\d+\.\d+\.\d+\.\d+)$/.exec(addr);
+  if (dotted) {
+    const o = dotted[1].split('.').map(Number);
+    addr = `${addr.slice(0, -dotted[1].length)}${((o[0] << 8) | o[1]).toString(16)}:${((o[2] << 8) | o[3]).toString(16)}`;
+  }
+  const [head, tail, ...rest] = addr.split('::');
+  if (rest.length) return null;
+  const h = head ? head.split(':') : [];
+  const t = tail !== undefined ? (tail ? tail.split(':') : []) : null;
+  const groups = t === null ? h : [...h, ...Array(8 - h.length - t.length).fill('0'), ...t];
+  if (groups.length !== 8) return null;
+  return groups.flatMap((g) => {
+    const n = parseInt(g, 16);
+    return [(n >> 8) & 0xff, n & 0xff];
+  });
+}
+
+/**
+ * The IPv4 address an IPv6 address stands for, if any: IPv4-mapped
+ * (::ffff:0:0/96, in hex or dotted form), IPv4-compatible (::/96), NAT64
+ * well-known prefix (64:ff9b::/96) and 6to4 (2002::/16). Each of these can
+ * reach an IPv4 host, so they must be judged by that IPv4 address.
+ */
+function embeddedIPv4(b: number[]): string | null {
+  const zero = (from: number, to: number) => b.slice(from, to).every((x) => x === 0);
+  const v4 = (i: number) => b.slice(i, i + 4).join('.');
+  if (zero(0, 10) && b[10] === 0xff && b[11] === 0xff) return v4(12);
+  if (zero(0, 12)) return v4(12);
+  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && zero(4, 12))
+    return v4(12);
+  if (b[0] === 0x20 && b[1] === 0x02) return v4(2);
+  return null;
+}
+
 /** True for globally routable addresses only (loopback, private, link-local, metadata → false). */
 export function isPublicAddress(address: string): boolean {
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
-  if (mapped) return !blocked.check(mapped[1], 'ipv4');
-  const family = isIP(address);
-  if (family === 0) return false;
-  return !blocked.check(address, family === 6 ? 'ipv6' : 'ipv4');
+  const family = isIP(address.replace(/%.*$/, ''));
+  if (family === 4) return !blocked.check(address, 'ipv4');
+  if (family !== 6) return false;
+  const bytes = ipv6Bytes(address);
+  if (!bytes) return false;
+  // Judge IPv4-embedding forms by their IPv4 address — never rely on
+  // BlockList's own (version-dependent) handling of mapped addresses.
+  const v4 = embeddedIPv4(bytes);
+  if (v4) return !blocked.check(v4, 'ipv4');
+  return !blocked.check(address.replace(/%.*$/, ''), 'ipv6');
 }
 
 /**

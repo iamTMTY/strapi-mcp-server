@@ -179,6 +179,12 @@ describe('media.upload — server-side guards', () => {
     await expect(
       upload({ filename: 'a.png', mime: 'image/png', source: { url: 'http://[::1]:1337/x.png' } })
     ).rejects.toThrow(/non-public address/);
+    // IPv4-mapped loopback literals; the URL parser turns both into [::ffff:7f00:1].
+    for (const url of ['http://[::ffff:7f00:1]:1337/x.png', 'http://[::ffff:127.0.0.1]/x.png']) {
+      await expect(
+        upload({ filename: 'a.png', mime: 'image/png', source: { url } })
+      ).rejects.toThrow(/non-public address/);
+    }
   });
 
   it('uploads a valid PNG as the calling admin', async () => {
@@ -236,11 +242,30 @@ describe('checkFileType / isPublicAddress', () => {
     'fd00::1',
     '::ffff:10.0.0.1',
     '0.0.0.0',
+    '::',
+    'fe80::1%eth0',
+    // IPv4-mapped in hex form (what URL parsing produces) and full form
+    '::ffff:7f00:1',
+    '0:0:0:0:0:ffff:7f00:1',
+    '::ffff:a9fe:a9fe',
+    // other IPv6 forms that reach an IPv4 host
+    '::127.0.0.1',
+    '::7f00:1',
+    '64:ff9b::a9fe:a9fe',
+    '2002:7f00:1::1',
+    // tunnelling / local-use translation ranges, blocked outright
+    '2001:0:4136:e378::1',
+    '64:ff9b:1::1',
   ])('treats %s as non-public', (ip) => expect(isPublicAddress(ip)).toBe(false));
 
-  it.each(['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111'])('treats %s as public', (ip) =>
-    expect(isPublicAddress(ip)).toBe(true)
-  );
+  it.each([
+    '8.8.8.8',
+    '1.1.1.1',
+    '2606:4700:4700::1111',
+    '::ffff:808:808',
+    '64:ff9b::808:808',
+    '2002:808:808::1',
+  ])('treats %s as public', (ip) => expect(isPublicAddress(ip)).toBe(true));
 });
 
 describe('media folders', () => {
