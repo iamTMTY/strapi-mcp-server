@@ -52,7 +52,7 @@ Upgrading is strongly recommended.
 - `strapi_media_request_upload` — a single-use, short-lived URL for uploading a local file of any size with `curl` (or a browser form). Files go through Strapi's upload service to your configured provider.
 - `strapi_media_get`, `strapi_media_list_folders`, `strapi_media_update`, `strapi_media_move`
 - `strapi_media_create_folder` (mkdir -p), `strapi_media_rename_folder`, `strapi_media_move_folder`
-- `strapi_media_delete` and `strapi_media_delete_folder` (scope `strapi:media:delete`), both with `dryRun`. Folder deletion checks every file inside against the role's permissions (e.g. "own files only") and deletes nothing if any is off-limits — stricter than Strapi's own bulk delete
+- `strapi_media_delete` and `strapi_media_delete_folder` (scope `strapi:media:delete`), both with `dryRun`. Folder deletion checks every file inside against the role's permissions (e.g. "own files only"), deletes nothing if any is off-limits, and deletes only the files it checked — a file added concurrently is kept, with its folder. Stricter than Strapi's own bulk delete
 - Every placing tool accepts `folderId` or `folderPath` (`"templates/thumbnails"`, created if missing).
 - `strapi_media_list` filters by folder, MIME (`"image"` = any image, `"image/png"` exact) and name.
 - Media responses never include `hash`, `provider`, `provider_metadata`, `formats` or `folderPath`.

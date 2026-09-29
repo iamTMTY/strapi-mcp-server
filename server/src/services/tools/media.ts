@@ -117,18 +117,12 @@ export function createMediaTools(strapi: Core.Strapi): ToolDef[] {
   }
 
   /**
-   * Files matching `where` the role may NOT act on. Without conditions on the
-   * action the answer is "none" and we skip loading every file.
+   * Ids of `files` the role may NOT act on. Without conditions on the action
+   * every file is allowed, so skip the per-file pass.
    */
-  async function forbiddenFiles(
-    pm: UploadPermissionsManager,
-    where: Record<string, unknown>
-  ): Promise<number[]> {
+  async function forbiddenAmong(pm: UploadPermissionsManager, files: FileRow[]): Promise<number[]> {
     const rules = pm.ability.rulesFor?.(pm.action, FILE_UID);
     if (rules && !rules.some((r) => r.conditions || r.inverted)) return [];
-    const files = (await strapi.db
-      .query(FILE_UID)
-      .findMany({ where, populate: { createdBy: true } })) as FileRow[];
     const authors = new Map<number, unknown>();
     const denied: number[] = [];
     for (const f of files) {
@@ -441,7 +435,7 @@ export function createMediaTools(strapi: Core.Strapi): ToolDef[] {
       name: 'strapi_media_delete_folder',
       title: 'Delete media folders',
       description:
-        'Permanently delete folders AND every subfolder and file inside them (from the database and the storage provider, with all thumbnails). No undo, and no check for entries still using the files. Use dryRun: true first. Rejects the whole call if any id is not a folder.',
+        'Permanently delete folders AND every subfolder and file inside them (from the database and the storage provider, with all thumbnails). No undo, and no check for entries still using the files. Use dryRun: true first. Rejects the whole call if any id is not a folder or any file inside is one you may not delete.',
       scope: 'strapi:media:delete',
       requires: 'media.update',
       annotations: {
@@ -475,10 +469,15 @@ export function createMediaTools(strapi: Core.Strapi): ToolDef[] {
             { [field]: { $startsWith: `${f.path}/` } },
           ]),
         });
-        // The cascade deletes every file inside; each must be one the role may
-        // manage (e.g. "own files only"), or nothing is deleted. Stricter than
-        // Strapi's own bulk delete, which only checks the action.
-        const denied = await forbiddenFiles(pm, under('folderPath'));
+        // Snapshot the contents ONCE, check every file (e.g. "own files only"),
+        // and delete exactly that checked set — never Strapi's blind cascade
+        // (folder.deleteByIds), which would also take anything a concurrent
+        // upload/move drops in after the check. Stricter than Strapi's own bulk
+        // delete, which only checks the action.
+        const files = (await strapi.db
+          .query(FILE_UID)
+          .findMany({ where: under('folderPath'), populate: { createdBy: true } })) as FileRow[];
+        const denied = await forbiddenAmong(pm, files);
         if (denied.length) {
           throw withCode(
             new Error(
@@ -487,27 +486,38 @@ export function createMediaTools(strapi: Core.Strapi): ToolDef[] {
             'forbidden'
           );
         }
+        const summary = folders.map(({ id, name }) => ({ id, name }));
         if (dryRun) {
-          const [totalFolderNumber, totalFileNumber] = await Promise.all([
-            strapi.db.query(FOLDER_UID).count({ where: under('path') }),
-            strapi.db.query('plugin::upload.file').count({ where: under('folderPath') }),
-          ]);
           return {
             dryRun: true,
-            folders: folders.map(({ id, name }) => ({ id, name })),
-            totalFolderNumber,
-            totalFileNumber,
+            folders: summary,
+            totalFolderNumber: await strapi.db.query(FOLDER_UID).count({ where: under('path') }),
+            totalFileNumber: files.length,
           };
         }
-        const res = (await strapi.plugin('upload').service('folder').deleteByIds(ids)) as {
-          totalFolderNumber: number;
-          totalFileNumber: number;
-        };
-        return {
-          deleted: folders.map(({ id, name }) => ({ id, name })),
-          totalFolderNumber: res.totalFolderNumber,
-          totalFileNumber: res.totalFileNumber,
-        };
+
+        for (const file of files) {
+          // eslint-disable-next-line no-await-in-loop
+          await uploadSvc().remove(file); // provider object + thumbnails + DB row
+        }
+
+        // Anything that arrived meanwhile was never checked: keep it, and the
+        // folders holding it, rather than deleting it.
+        const arrived = await strapi.db.query(FILE_UID).count({ where: under('folderPath') });
+        if (arrived > 0) {
+          return {
+            deleted: [],
+            keptFolders: summary,
+            totalFolderNumber: 0,
+            totalFileNumber: files.length,
+            note: `${arrived} file(s) were added to these folders while deleting. They were not checked, so they and the folders were kept; review and retry.`,
+          };
+        }
+        const { count: totalFolderNumber } = await strapi.db
+          .query(FOLDER_UID)
+          .deleteMany({ where: under('path') });
+        strapi.eventHub.emit('media-folder.delete', { folders });
+        return { deleted: summary, totalFolderNumber, totalFileNumber: files.length };
       },
     }),
 

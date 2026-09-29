@@ -183,8 +183,9 @@ Admin page permissions (registered in `register.ts`):
 - `strapi:media:read`: `list`, `get`, `list_folders`
 - `strapi:media:write`: `upload`, `request_upload`, `update`, `move`,
   `create_folder`, `rename_folder`, `move_folder`
-- `strapi:media:delete`: `delete`, `delete_folder` (`delete_folder` checks every file inside
-  with `forbiddenFiles` before cascading; Strapi's own bulk delete doesn't)
+- `strapi:media:delete`: `delete`, `delete_folder` (`delete_folder` snapshots the files inside, checks
+  each with `forbiddenAmong`, removes exactly that set, and deletes the folder
+  rows only if nothing new arrived — never Strapi's blind `deleteByIds` cascade)
 
 Names use underscores; dotted 0.1 names still work as `tools.enabled` keys.
 Populate paths are turned into Strapi populate objects by `buildPopulate`,
