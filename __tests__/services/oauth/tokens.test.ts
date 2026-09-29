@@ -82,9 +82,11 @@ function makeTokens(opts?: {
   });
 
   const revQuery = mockQuery({
-    findOne: jest.fn(async ({ where }: { where: { jti: string } }) =>
-      revokedJtis.has(where.jti) ? { jti: where.jti } : null
-    ),
+    findOne: jest.fn(async ({ where }: { where: { jti: string | { $in: string[] } } }) => {
+      const candidates = typeof where.jti === 'string' ? [where.jti] : where.jti.$in;
+      const hit = candidates.find((j) => revokedJtis.has(j));
+      return hit ? { jti: hit } : null;
+    }),
     create: jest.fn(async ({ data }: { data: { jti: string } }) => {
       revokedJtis.add(data.jti);
       return data;
@@ -317,5 +319,32 @@ describe('tokens.verifyAccessToken (external)', () => {
   it('returns invalid_token when external mode is set but external config missing', async () => {
     const { tokens } = makeTokens({ mode: 'external' /* no external block */ });
     await expect(tokens.verifyAccessToken('any-token')).rejects.toThrow('invalid_token');
+  });
+});
+
+describe('tokens — family revocation sticks for tokens minted afterwards', () => {
+  it('a refresh token minted into an already-revoked family is unusable', async () => {
+    const { tokens } = makeTokens();
+    await tokens.revokeFamily('fam-1');
+    // e.g. the winner of a concurrent code redemption mints after the loser revoked
+    const late = await tokens.mint({
+      adminUserId: '1',
+      clientId: 'cid',
+      scope: ['strapi:content:read'],
+      familyId: 'fam-1',
+    });
+    expect(await tokens.consumeRefresh(late.refreshToken)).toBeNull();
+  });
+
+  it('access tokens carry their family and die with it', async () => {
+    const { tokens } = makeTokens();
+    const minted = await tokens.mint({
+      adminUserId: '1',
+      clientId: 'cid',
+      scope: ['strapi:content:read'],
+    });
+    await expect(tokens.verifyAccessToken(minted.accessToken)).resolves.toMatchObject({ sub: '1' });
+    await tokens.revokeFamily(minted.familyId);
+    await expect(tokens.verifyAccessToken(minted.accessToken)).rejects.toThrow('invalid_token');
   });
 });

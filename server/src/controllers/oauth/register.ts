@@ -3,7 +3,7 @@
 import type { Core } from '@strapi/strapi';
 import type { Context } from 'koa';
 import { getConfig } from '../../config';
-import { ALL_SCOPES, parseScope, type Scope } from '../../services/oauth/scopes';
+import { DEFAULT_SCOPES, parseScope, type Scope } from '../../services/oauth/scopes';
 import { ensureEmbeddedMode } from './mode-guard';
 
 /**
@@ -83,7 +83,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       }
     }
     const requestedScopes = parseScope(body.scope ?? '');
-    const grantedScopes: Scope[] = requestedScopes.length > 0 ? requestedScopes : [...ALL_SCOPES];
+    // No scope requested → non-destructive defaults only; publish/delete must
+    // be asked for explicitly (and are still subject to consent + RBAC).
+    const grantedScopes: Scope[] =
+      requestedScopes.length > 0 ? requestedScopes : [...DEFAULT_SCOPES];
 
     try {
       const { client, clientSecret } = await strapi

@@ -129,8 +129,10 @@ async function handleAuthCode(
     adminUserId: consumed.adminUserId,
     clientId: client.clientId,
     scope: scopes,
+    // Fixed atomically when the code was consumed, so a concurrent replay can
+    // revoke this family even before these tokens exist.
+    familyId: consumed.familyId ?? undefined,
   });
-  await codesSvc.linkFamily(consumed.id, minted.familyId);
   await clientsSvc.touchLastUsed(client.clientId);
 
   ctx.set('Cache-Control', 'no-store');

@@ -54,9 +54,10 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     },
 
     /**
-     * Single-use, race-safe. Returns the row if this caller consumed it,
-     * 'replayed' if it was already used (revoking the refresh family minted
-     * from it), null if unknown or expired.
+     * Single-use, race-safe. Returns the row (with the refresh `familyId`
+     * the caller must mint into) if this caller consumed it; 'replayed' if it
+     * was already used — sequentially or concurrently — after revoking the
+     * family the winning redemption mints into; null if unknown or expired.
      */
     async consume(code: string): Promise<AuthCodeRow | 'replayed' | null> {
       const codeHash = sha256(code);
@@ -73,19 +74,24 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         return 'replayed';
       }
 
-      // Atomic claim: only the caller whose conditional update flips the row
-      // wins. Re-reading `used` afterwards can't tell two racers apart.
+      // Atomic claim. The winner also fixes the refresh family id in the same
+      // statement, so a racing loser can always find — and revoke — it, even
+      // before the winner has minted anything.
+      const familyId = randomBytes(16).toString('hex');
       const { count } = await strapi.db.query(UID).updateMany({
         where: { id: row.id, used: false },
-        data: { used: true },
+        data: { used: true, familyId },
       });
-      if (count !== 1) return 'replayed';
-      return { ...row, used: true };
-    },
-
-    /** Link the refresh family minted from this code, so a replay can revoke it. */
-    async linkFamily(id: number, familyId: string): Promise<void> {
-      await strapi.db.query(UID).update({ where: { id }, data: { familyId } });
+      if (count !== 1) {
+        const winner = (await strapi.db
+          .query(UID)
+          .findOne({ where: { id: row.id } })) as AuthCodeRow | null;
+        if (winner?.familyId) {
+          await strapi.plugin('mcp-server').service('tokens').revokeFamily(winner.familyId);
+        }
+        return 'replayed';
+      }
+      return { ...row, used: true, familyId };
     },
   };
 };

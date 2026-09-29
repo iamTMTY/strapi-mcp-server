@@ -15,6 +15,7 @@ import { useMcpApi } from '../lib/api';
 import { PageHeader } from '../components/PageHeader';
 import {
   ALL_SCOPES as SERVER_SCOPES,
+  DEFAULT_SCOPES,
   SCOPE_LABELS,
 } from '../../../server/src/services/oauth/scopes';
 
@@ -33,10 +34,8 @@ export function NewClient(): JSX.Element {
   const [name, setName] = useState('');
   const [redirects, setRedirects] = useState('');
   const [isConfidential, setIsConfidential] = useState(false);
-  const [scopes, setScopes] = useState<string[]>(
-    // Destructive scopes (publish / delete) are opt-in.
-    ALL_SCOPES.map((s) => s.id).filter((id) => !/:(publish|delete)$/.test(id))
-  );
+  // Destructive scopes (publish / delete) are opt-in.
+  const [scopes, setScopes] = useState<string[]>([...DEFAULT_SCOPES]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<CreatedResponse | null>(null);

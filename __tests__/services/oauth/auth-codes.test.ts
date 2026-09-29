@@ -53,10 +53,12 @@ function makeAuthCodes(rows: AuthCodeRow[] = []) {
       }
     ),
   });
+  const tokens = { revokeFamily: jest.fn(async () => undefined) };
   const strapi = makeStrapi({
     query: { 'plugin::mcp-server.oauth-auth-code': query },
+    services: { tokens },
   });
-  return { svc: authCodesFactory({ strapi }), rows };
+  return { svc: authCodesFactory({ strapi }), rows, tokens };
 }
 
 describe('auth-codes.issue', () => {
@@ -109,8 +111,8 @@ describe('auth-codes.consume', () => {
     expect(await svc.consume(code)).toBe('replayed');
   });
 
-  it('lets exactly one of two concurrent consumers win', async () => {
-    const { svc } = makeAuthCodes();
+  it("lets exactly one of two concurrent consumers win, and the loser revokes the winner's family", async () => {
+    const { svc, tokens } = makeAuthCodes();
     const code = await svc.issue({
       clientId: 'cid',
       adminUserId: '1',
@@ -120,7 +122,27 @@ describe('auth-codes.consume', () => {
       resource: 'http://localhost:1337/mcp',
     });
     const results = await Promise.all([svc.consume(code), svc.consume(code)]);
-    expect(results.filter((r) => r && r !== 'replayed')).toHaveLength(1);
+    const winners = results.filter((r): r is AuthCodeRow => !!r && r !== 'replayed');
+    expect(winners).toHaveLength(1);
+    expect(winners[0].familyId).toMatch(/^[0-9a-f]{32}$/);
+    expect(results).toContain('replayed');
+    // The family is known before the winner mints, so it can be revoked.
+    expect(tokens.revokeFamily).toHaveBeenCalledWith(winners[0].familyId);
+  });
+
+  it('a later sequential replay revokes the family too', async () => {
+    const { svc, tokens } = makeAuthCodes();
+    const code = await svc.issue({
+      clientId: 'cid',
+      adminUserId: '1',
+      scope: 'strapi:content:read',
+      redirectUri: 'http://localhost/callback',
+      codeChallenge: 'cc',
+      resource: 'http://localhost:1337/mcp',
+    });
+    const first = (await svc.consume(code)) as AuthCodeRow;
+    expect(await svc.consume(code)).toBe('replayed');
+    expect(tokens.revokeFamily).toHaveBeenCalledWith(first.familyId);
   });
 
   it('returns null for unknown code', async () => {

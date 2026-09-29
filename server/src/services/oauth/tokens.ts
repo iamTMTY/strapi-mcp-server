@@ -83,11 +83,14 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       const issuer = authorizationServerUrl(strapi);
       const audience = canonicalResourceUrl(strapi);
 
+      const familyId = opts.familyId ?? randomBytes(16).toString('hex');
       const payload: JWTPayload = {
         scope: scopeString(opts.scope),
         client_id: opts.clientId,
         azp: opts.clientId,
         jti,
+        // Lets a family revocation kill already-issued access tokens too.
+        fid: familyId,
       };
       const accessToken = await new SignJWT(payload)
         .setProtectedHeader({ alg: key.alg, kid: key.kid, typ: 'at+jwt' })
@@ -99,7 +102,6 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         .sign(key.privateKey);
 
       const refreshSecret = randomBytes(32).toString('base64url');
-      const familyId = opts.familyId ?? randomBytes(16).toString('hex');
       // Rotation slides the refresh expiry forward, but never past the
       // family's absolute deadline — otherwise a family lives forever.
       const familyExpiresAt =
@@ -168,7 +170,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       if (new Date(row.expiresAt).getTime() < Date.now()) {
         return null;
       }
-      if (row.revoked || row.rotatedTo) {
+      if (row.revoked || row.rotatedTo || (await this.isFamilyRevoked(row.familyId))) {
         await this.revokeFamily(row.familyId);
         strapi.log.warn(
           `[mcp-server] refresh-token reuse detected family=${row.familyId} client=${row.clientId} — family revoked`
@@ -197,11 +199,37 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
         .update({ where: { id: parentRowId }, data: { rotatedTo: newRefreshHash } });
     },
 
+    /**
+     * Revoke every token of a family — including ones minted *after* this
+     * call by a request that is racing it (e.g. the winner of a concurrent
+     * code redemption). Existing refresh rows are flagged, and a persistent
+     * marker makes later refresh rows and every access token carrying this
+     * family id (`fid`) invalid.
+     */
     async revokeFamily(familyId: string): Promise<void> {
+      if (!familyId) return;
+      const cfg = getConfig(strapi);
+      try {
+        await strapi.db.query(REVOKE_UID).create({
+          data: {
+            jti: familyMarker(familyId),
+            // Outlives any token of the family, then the nightly purge drops it.
+            expiresAt: new Date(Date.now() + cfg.oauth.refreshFamilyMaxAgeSec * 1000),
+          },
+        });
+      } catch {
+        // unique collision — already revoked
+      }
       await strapi.db.query(REFRESH_UID).updateMany({
         where: { familyId },
         data: { revoked: true },
       });
+    },
+
+    async isFamilyRevoked(familyId: string): Promise<boolean> {
+      return !!(await strapi.db
+        .query(REVOKE_UID)
+        .findOne({ where: { jti: familyMarker(familyId) } }));
     },
 
     async revokeRefresh(refreshSecret: string): Promise<void> {
@@ -243,6 +271,11 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   };
 };
 
+/** Revocation-table key for a whole refresh family (fits the 64-char jti column). */
+function familyMarker(familyId: string): string {
+  return `family:${familyId}`;
+}
+
 async function verifyEmbedded(strapi: Core.Strapi, token: string): Promise<VerifiedClaims> {
   const sk = strapi.plugin('mcp-server').service('signing-keys');
   const jwks = createLocalJWKSet(await sk.publicJwks());
@@ -262,7 +295,10 @@ async function verifyEmbedded(strapi: Core.Strapi, token: string): Promise<Verif
   const jti = typeof claims.jti === 'string' ? claims.jti : '';
   if (!jti) throw new Error('invalid_token');
 
-  const revoked = await strapi.db.query(REVOKE_UID).findOne({ where: { jti } });
+  const fid = typeof claims.fid === 'string' ? claims.fid : '';
+  const revoked = await strapi.db.query(REVOKE_UID).findOne({
+    where: { jti: { $in: fid ? [jti, familyMarker(fid)] : [jti] } },
+  });
   if (revoked) throw new Error('invalid_token');
 
   const sub = typeof claims.sub === 'string' ? claims.sub : '';

@@ -24,7 +24,7 @@ Upgrading is strongly recommended.
 - **Stale permissions and scopes.** Tool calls used the principal and scopes captured when the session started. Every call now uses the current token, role and client state.
 - **SSRF in URL uploads.** Private, loopback, link-local and metadata addresses are refused, checked at connection time and on every redirect.
 - **Content-type spoofing on upload.** Declared MIME types were trusted (`x.html` as `image/png`). Extension, MIME type and file contents must now agree.
-- **Authorization-code and refresh-token races.** Concurrent requests could redeem one code or rotate one refresh token twice. Consumption is atomic; a replayed code revokes the tokens it produced.
+- **Authorization-code and refresh-token races.** Concurrent requests could redeem one code or rotate one refresh token twice. Consumption is atomic, and a replayed code — sequential or concurrent — revokes the token family the winning redemption mints into. Family revocation is now persistent, so it also invalidates tokens minted _after_ it and every access token of that family.
 - **External mode accepted any token from the IdP.** `aud` was not checked. `oauth.external.audience` is now required, and `email_verified: false` tokens are rejected.
 - **Client changes didn't take effect.** Disabling a client or narrowing its scopes had no effect on existing tokens. Both now apply on the next request and on refresh.
 - **Unbounded refresh sessions.** Refresh families now have an absolute lifetime (`oauth.refreshFamilyMaxAgeSec`, 30 days).
@@ -71,7 +71,7 @@ Upgrading is strongly recommended.
 ### Changed
 
 - The plugin is active once `resourceUrl` is set; until then every public route returns 404. Turn it off with Strapi's standard `'mcp-server': { enabled: false }`.
-- New clients created in the admin UI get read/write scopes by default; publish and delete scopes are opt-in.
+- Publish and delete scopes are opt-in everywhere: new clients created in the admin UI get read/write scopes by default, and self-registered (DCR) clients that don't request specific scopes get only read/write.
 - The admin UI Overview no longer shows sessions; Settings no longer shows session or cluster options.
 
 ### Removed

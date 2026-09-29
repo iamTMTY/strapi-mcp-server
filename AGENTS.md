@@ -1,7 +1,7 @@
 # strapi-mcp-server
 
 A standalone Strapi v5 plugin that exposes a Strapi instance as a Model
-Context Protocol (MCP) server. AI clients (Claude Code, Claude web, Cursor,
+Context Protocol (MCP) server. AI clients (Codex, Codex web, Cursor,
 opencode, …) connect over stateless Streamable HTTP and call 22 generic
 content + media tools, gated by OAuth 2.1 + PKCE and the signed-in admin's
 Strapi RBAC permissions. It is a drop-in alternative to Strapi's built-in
@@ -111,15 +111,9 @@ __tests__/                     # unit tests by area + integration/ against the f
 - Audience-bound RS256 access tokens (10 min), rotating refresh tokens (24 h)
   inside an absolute family lifetime (`refreshFamilyMaxAgeSec`, 30 d). Code
   and refresh consumption are atomic (`updateMany … count === 1`); reuse or a
-  concurrent refresh revokes the family; a replayed code (sequential or
-  concurrent) revokes the family the winner mints into — the winner fixes
-  `familyId` in the same atomic update that marks the code used. Family
-  revocation writes a `family:<id>` marker to the revocation table, and access
-  tokens carry `fid`, so tokens minted _after_ a revocation are dead too.
-  Refresh and `authenticate` both intersect scopes with the client's
+  concurrent refresh revokes the family; a replayed code revokes what it
+  minted. Refresh and `authenticate` both intersect scopes with the client's
   _current_ grant, and `authenticate` rejects disabled/deleted clients.
-- DCR clients that don't request scopes get `DEFAULT_SCOPES` (read/write);
-  publish/delete scopes are only granted when explicitly requested.
 - External mode requires `external.audience` and rejects `email_verified:false`.
 - Signing key encrypted at rest (AES-256-GCM, key HKDF'd from `APP_KEYS` +
   `ADMIN_JWT_SECRET`; rotating either regenerates it).

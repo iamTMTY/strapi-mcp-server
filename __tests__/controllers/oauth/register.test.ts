@@ -219,3 +219,32 @@ describe('DCR redirect host allowlist', () => {
     expect(c.status).toBe(400);
   });
 });
+
+describe('DCR default scopes', () => {
+  it('grants only non-destructive scopes when none are requested', async () => {
+    const { controller, clientsCreate } = makeController();
+    const c = ctx({ client_name: 'x', redirect_uris: ['http://localhost/cb'] });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await controller.register(c as any);
+    const scopes = (clientsCreate.mock.calls[0] as unknown as [{ scopes: string[] }])[0].scopes;
+    expect(scopes).toEqual([
+      'strapi:content:read',
+      'strapi:content:write',
+      'strapi:media:read',
+      'strapi:media:write',
+    ]);
+  });
+
+  it('grants destructive scopes only when explicitly requested', async () => {
+    const { controller, clientsCreate } = makeController();
+    const c = ctx({
+      client_name: 'x',
+      redirect_uris: ['http://localhost/cb'],
+      scope: 'strapi:content:read strapi:content:delete',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await controller.register(c as any);
+    const scopes = (clientsCreate.mock.calls[0] as unknown as [{ scopes: string[] }])[0].scopes;
+    expect(scopes).toEqual(['strapi:content:read', 'strapi:content:delete']);
+  });
+});
