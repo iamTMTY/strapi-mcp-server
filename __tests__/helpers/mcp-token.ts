@@ -25,36 +25,46 @@ export interface MintResult {
   adminJwt: string;
 }
 
-export async function mintMcpToken(): Promise<MintResult> {
-  const { token: adminJwt, user } = await ensureAdmin();
+export const DEFAULT_TEST_SCOPES = [
+  'strapi:content:read',
+  'strapi:content:write',
+  'strapi:media:read',
+  'strapi:media:write',
+];
+
+/**
+ * `as` mints for another admin (e.g. an Author-role user); the client is
+ * always created by the seeded super-admin.
+ */
+export async function mintMcpToken(
+  opts: { scopes?: string[]; as?: { token: string; user: { id: number } } } = {}
+): Promise<MintResult> {
+  const scopes = opts.scopes ?? DEFAULT_TEST_SCOPES;
+  const superAdmin = await ensureAdmin();
+  const { token: adminJwt, user } = opts.as ?? superAdmin;
 
   // Create a confidential client via the plugin's admin API.
   const clientResp = await adminFetch('/mcp-server/clients', {
     method: 'POST',
-    token: adminJwt,
+    token: superAdmin.token,
     body: {
       clientName: 'integration-test-client',
       redirectUris: ['http://localhost/callback'],
-      scopes: [
-        'strapi:content:read',
-        'strapi:content:write',
-        'strapi:media:read',
-        'strapi:media:write',
-      ],
+      scopes,
       isConfidential: true,
     },
   });
   if (clientResp.status !== 201 && clientResp.status !== 200) {
-    throw new Error(`create client failed: ${clientResp.status} ${JSON.stringify(clientResp.body)}`);
+    throw new Error(
+      `create client failed: ${clientResp.status} ${JSON.stringify(clientResp.body)}`
+    );
   }
   const createdClient = clientResp.body as {
     client: { clientId: string };
     clientSecret: string;
   };
   if (!createdClient.client?.clientId) {
-    throw new Error(
-      `create client returned unexpected shape: ${JSON.stringify(clientResp.body)}`
-    );
+    throw new Error(`create client returned unexpected shape: ${JSON.stringify(clientResp.body)}`);
   }
   const clientId = createdClient.client.clientId;
   const clientSecret = createdClient.clientSecret;
@@ -91,7 +101,7 @@ export async function mintMcpToken(): Promise<MintResult> {
   authorizeUrl.searchParams.set('response_type', 'code');
   authorizeUrl.searchParams.set('client_id', clientId);
   authorizeUrl.searchParams.set('redirect_uri', redirectUri);
-  authorizeUrl.searchParams.set('scope', 'strapi:content:read strapi:content:write strapi:media:read strapi:media:write');
+  authorizeUrl.searchParams.set('scope', scopes.join(' '));
   authorizeUrl.searchParams.set('state', state);
   authorizeUrl.searchParams.set('code_challenge', challenge);
   authorizeUrl.searchParams.set('code_challenge_method', 'S256');
@@ -126,7 +136,7 @@ export async function mintMcpToken(): Promise<MintResult> {
     csrf,
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: 'strapi:content:read strapi:content:write strapi:media:read strapi:media:write',
+    scope: scopes.join(' '),
     state,
     code_challenge: challenge,
     code_challenge_method: 'S256',

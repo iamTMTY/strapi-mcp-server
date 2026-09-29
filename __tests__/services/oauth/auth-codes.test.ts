@@ -20,16 +20,45 @@ function makeAuthCodes(rows: AuthCodeRow[] = []) {
       }
       return null;
     }),
-    update: jest.fn(async ({ where, data }: { where: { id: number; used?: boolean }; data: Partial<AuthCodeRow> }) => {
-      const row = rows.find((r) => r.id === where.id && (where.used === undefined || r.used === where.used));
-      if (row) Object.assign(row, data);
-      return row;
-    }),
+    update: jest.fn(
+      async ({
+        where,
+        data,
+      }: {
+        where: { id: number; used?: boolean };
+        data: Partial<AuthCodeRow>;
+      }) => {
+        const row = rows.find(
+          (r) => r.id === where.id && (where.used === undefined || r.used === where.used)
+        );
+        if (row) Object.assign(row, data);
+        return row;
+      }
+    ),
+    updateMany: jest.fn(
+      async ({
+        where,
+        data,
+      }: {
+        where: { id: number; used?: boolean };
+        data: Partial<AuthCodeRow>;
+      }) => {
+        // Yield first so concurrent consumers interleave like real DB calls.
+        await Promise.resolve();
+        const matches = rows.filter(
+          (r) => r.id === where.id && (where.used === undefined || r.used === where.used)
+        );
+        matches.forEach((r) => Object.assign(r, data));
+        return { count: matches.length };
+      }
+    ),
   });
+  const tokens = { revokeFamily: jest.fn(async () => undefined) };
   const strapi = makeStrapi({
     query: { 'plugin::mcp-server.oauth-auth-code': query },
+    services: { tokens },
   });
-  return { svc: authCodesFactory({ strapi }), rows };
+  return { svc: authCodesFactory({ strapi }), rows, tokens };
 }
 
 describe('auth-codes.issue', () => {
@@ -80,6 +109,40 @@ describe('auth-codes.consume', () => {
     });
     await svc.consume(code);
     expect(await svc.consume(code)).toBe('replayed');
+  });
+
+  it("lets exactly one of two concurrent consumers win, and the loser revokes the winner's family", async () => {
+    const { svc, tokens } = makeAuthCodes();
+    const code = await svc.issue({
+      clientId: 'cid',
+      adminUserId: '1',
+      scope: 'strapi:content:read',
+      redirectUri: 'http://localhost/callback',
+      codeChallenge: 'cc',
+      resource: 'http://localhost:1337/mcp',
+    });
+    const results = await Promise.all([svc.consume(code), svc.consume(code)]);
+    const winners = results.filter((r): r is AuthCodeRow => !!r && r !== 'replayed');
+    expect(winners).toHaveLength(1);
+    expect(winners[0].familyId).toMatch(/^[0-9a-f]{32}$/);
+    expect(results).toContain('replayed');
+    // The family is known before the winner mints, so it can be revoked.
+    expect(tokens.revokeFamily).toHaveBeenCalledWith(winners[0].familyId);
+  });
+
+  it('a later sequential replay revokes the family too', async () => {
+    const { svc, tokens } = makeAuthCodes();
+    const code = await svc.issue({
+      clientId: 'cid',
+      adminUserId: '1',
+      scope: 'strapi:content:read',
+      redirectUri: 'http://localhost/callback',
+      codeChallenge: 'cc',
+      resource: 'http://localhost:1337/mcp',
+    });
+    const first = (await svc.consume(code)) as AuthCodeRow;
+    expect(await svc.consume(code)).toBe('replayed');
+    expect(tokens.revokeFamily).toHaveBeenCalledWith(first.familyId);
   });
 
   it('returns null for unknown code', async () => {

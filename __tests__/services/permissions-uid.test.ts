@@ -63,40 +63,14 @@ describe('permissions.listAllowedUids', () => {
   });
 });
 
-describe('permissions.canActionOnUid', () => {
-  const principalAdmin = {
-    user: { id: 1, isActive: true },
-    permissions: [
-      { action: 'plugin::content-manager.explorer.read', subject: 'api::article.article' },
-      { action: 'plugin::content-manager.explorer.create', subject: null }, // wildcard
-    ],
-    isSuperAdmin: false,
-  };
-  const principalSuper = { ...principalAdmin, isSuperAdmin: true, permissions: [] };
-
-  it('always denies internal UIDs even for super-admin', async () => {
-    expect(await svc.canActionOnUid(principalSuper, 'admin::user', 'read')).toBe(false);
-    expect(await svc.canActionOnUid(principalSuper, 'plugin::mcp-server.oauth-client', 'read')).toBe(false);
-  });
-
-  it('super-admin allowed on regular UIDs', async () => {
-    expect(await svc.canActionOnUid(principalSuper, 'api::article.article', 'update')).toBe(true);
-    expect(await svc.canActionOnUid(principalSuper, 'api::page.page', 'delete')).toBe(true);
-  });
-
-  it('matches subject-specific permission', async () => {
-    expect(await svc.canActionOnUid(principalAdmin, 'api::article.article', 'read')).toBe(true);
-  });
-
-  it('rejects when subject doesnt match', async () => {
-    expect(await svc.canActionOnUid(principalAdmin, 'api::page.page', 'read')).toBe(false);
-  });
-
-  it('accepts wildcard subject (subject: null)', async () => {
-    expect(await svc.canActionOnUid(principalAdmin, 'api::page.page', 'create')).toBe(true);
-  });
-
-  it('rejects an action not granted', async () => {
-    expect(await svc.canActionOnUid(principalAdmin, 'api::article.article', 'delete')).toBe(false);
+describe('permissions.contentChecker', () => {
+  it('refuses internal UIDs before touching the permission engine', async () => {
+    const principal = { user: { id: 1 }, isSuperAdmin: true };
+    await expect(svc.contentChecker(principal, 'admin::user')).rejects.toMatchObject({
+      code: 'forbidden',
+    });
+    await expect(
+      svc.contentChecker(principal, 'plugin::mcp-server.oauth-client')
+    ).rejects.toMatchObject({ code: 'forbidden' });
   });
 });

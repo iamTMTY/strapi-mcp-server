@@ -3,7 +3,7 @@
 import type { Core } from '@strapi/strapi';
 import type { Context } from 'koa';
 import { randomBytes } from 'crypto';
-import { parseScope, scopeString, isSubsetOf } from '../../services/oauth/scopes';
+import { parseScope, scopeString, isSubsetOf, SCOPE_LABELS } from '../../services/oauth/scopes';
 import { canonicalResourceUrl } from '../../services/oauth/audience';
 import { ensureEmbeddedMode } from './mode-guard';
 
@@ -18,9 +18,24 @@ interface AuthorizeQuery {
   resource?: string;
 }
 
+/**
+ * Same-origin path only. Rejects absolute URLs, `javascript:`, and the
+ * protocol-relative `//host` / `/\host` forms browsers treat as cross-origin.
+ */
+export function isSafeLocalPath(p: unknown): p is string {
+  return (
+    typeof p === 'string' &&
+    p.startsWith('/') &&
+    !p.startsWith('//') &&
+    !p.startsWith('/\\') &&
+    !/[\r\n]/.test(p)
+  );
+}
+
 function htmlEscape(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string
   );
 }
 
@@ -46,7 +61,12 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     if (!ensureEmbeddedMode(ctx, strapi)) return;
     const q = ctx.query as AuthorizeQuery;
     if (q.response_type !== 'code') {
-      return renderError(ctx, 400, 'unsupported_response_type', 'only response_type=code is supported');
+      return renderError(
+        ctx,
+        400,
+        'unsupported_response_type',
+        'only response_type=code is supported'
+      );
     }
     if (!q.client_id) return renderError(ctx, 400, 'invalid_request', 'client_id required');
     if (!q.redirect_uri) return renderError(ctx, 400, 'invalid_request', 'redirect_uri required');
@@ -157,20 +177,13 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       /* unreachable — redirect_uri was validated above */
     }
     ctx.type = 'text/html';
-    const SCOPE_LABELS = (strapi
-      .plugin('mcp-server')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .service('clients') as any).SCOPE_LABELS;
-    void SCOPE_LABELS;
-    const labels: Record<string, string> = {
-      'strapi:content:read': 'Read content (list types, schemas, entries)',
-      'strapi:content:write': 'Create and update content entries (draft only)',
-      'strapi:media:read': 'List media files',
-      'strapi:media:write': 'Upload media files',
-    };
     ctx.body = renderConsent({
       clientName: client.clientName,
-      scopes: requestedScopes.map((s) => labels[s] ?? s),
+      redirectTarget: describeRedirect(q.redirect_uri),
+      // Self-registered (DCR) clients nobody has vouched for yet: the name is
+      // attacker-chosen, so tell the admin to trust the redirect target instead.
+      unverified: !client.createdByAdminId,
+      scopes: requestedScopes.map((s) => SCOPE_LABELS[s] ?? s),
       resource: canonicalResourceUrl(strapi),
       csrf,
       hidden: {
@@ -205,20 +218,21 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const adminId = await ssoSvc.verify(ctx.cookies.get(ssoSvc.cookieName()));
     if (!adminId) return renderError(ctx, 401, 'invalid_request', 'SSO expired');
 
+    // Re-validate inputs server-side — the form may have been tampered with.
+    // Done before the deny redirect too, so deny can't be an open redirect.
+    const clientsSvc = strapi.plugin('mcp-server').service('clients');
+    const client = await clientsSvc.findActive(body.client_id);
+    if (!client) return renderError(ctx, 400, 'invalid_request', 'unknown client');
+    if (!clientsSvc.isAllowedRedirectUri(client, body.redirect_uri)) {
+      return renderError(ctx, 400, 'invalid_request', 'redirect_uri not allowed');
+    }
+
     if (body.decision !== 'approve') {
       const target = new URL(body.redirect_uri);
       target.searchParams.set('error', 'access_denied');
       if (body.state) target.searchParams.set('state', body.state);
       ctx.redirect(target.toString());
       return;
-    }
-
-    // Re-validate inputs server-side — the form may have been tampered with.
-    const clientsSvc = strapi.plugin('mcp-server').service('clients');
-    const client = await clientsSvc.findActive(body.client_id);
-    if (!client) return renderError(ctx, 400, 'invalid_request', 'unknown client');
-    if (!clientsSvc.isAllowedRedirectUri(client, body.redirect_uri)) {
-      return renderError(ctx, 400, 'invalid_request', 'redirect_uri not allowed');
     }
     if (body.code_challenge_method !== 'S256' || !body.code_challenge) {
       return renderError(ctx, 400, 'invalid_request', 'bad challenge');
@@ -262,17 +276,20 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // Audit the consent grant attributed to the approving admin — this is the
     // entry that ties a human identity to the client, since DCR itself is
     // unauthenticated and audits as #anonymous.
-    strapi.plugin('mcp-server').service('audit').record({
-      ts: new Date(),
-      principalType: 'admin',
-      principalId: adminId,
-      clientId: client.clientId,
-      tool: 'oauth.consent.grant',
-      params: { scopes, redirectUri: body.redirect_uri },
-      resultStatus: 'ok',
-      ip: ctx.ip ?? ctx.request.ip,
-      userAgent: ctx.request.header['user-agent'] as string | undefined,
-    });
+    strapi
+      .plugin('mcp-server')
+      .service('audit')
+      .record({
+        ts: new Date(),
+        principalType: 'admin',
+        principalId: adminId,
+        clientId: client.clientId,
+        tool: 'oauth.consent.grant',
+        params: { scopes, redirectUri: body.redirect_uri },
+        resultStatus: 'ok',
+        ip: ctx.ip ?? ctx.request.ip,
+        userAgent: ctx.request.header['user-agent'] as string | undefined,
+      });
 
     const target = new URL(body.redirect_uri);
     target.searchParams.set('code', code);
@@ -340,15 +357,16 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // it carries the canonical OAuth URL untouched by Strapi's login flow
     // (which double-decodes its redirectTo param and mangles nested query
     // strings). Fall back to body.next, then the plugin home.
-    const resumeFromCookie = await ssoSvc.verifyResume(
-      ctx.cookies.get(ssoSvc.resumeCookieName())
-    );
+    const resumeFromCookie = await ssoSvc.verifyResume(ctx.cookies.get(ssoSvc.resumeCookieName()));
     if (resumeFromCookie) {
       ctx.cookies.set(ssoSvc.resumeCookieName(), '', { maxAge: 0, signed: false });
     }
     ctx.body = {
       ok: true,
-      next: resumeFromCookie ?? body.next ?? '/admin/plugins/mcp-server',
+      next:
+        (isSafeLocalPath(resumeFromCookie) && resumeFromCookie) ||
+        (isSafeLocalPath(body.next) && body.next) ||
+        '/admin/plugins/mcp-server',
     };
   },
 });
@@ -372,18 +390,31 @@ async function issueAuthCode(input: {
   });
 }
 
+/** Human-readable redirect target: host for web URIs, "this computer" for loopback. */
+function describeRedirect(uri: string): string {
+  try {
+    const u = new URL(uri);
+    const h = u.hostname.toLowerCase();
+    if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1') {
+      return 'an app on this computer (localhost)';
+    }
+    return u.host || `${u.protocol}//`;
+  } catch {
+    return uri;
+  }
+}
+
 function renderConsent(opts: {
   clientName: string;
+  redirectTarget: string;
+  unverified: boolean;
   scopes: string[];
   resource: string;
   csrf: string;
   hidden: Record<string, string>;
 }): string {
   const hiddenInputs = Object.entries(opts.hidden)
-    .map(
-      ([k, v]) =>
-        `<input type="hidden" name="${htmlEscape(k)}" value="${htmlEscape(v)}" />`
-    )
+    .map(([k, v]) => `<input type="hidden" name="${htmlEscape(k)}" value="${htmlEscape(v)}" />`)
     .join('\n');
   const scopes = opts.scopes.map((s) => `<li>${htmlEscape(s)}</li>`).join('');
   return `<!doctype html>
@@ -401,10 +432,17 @@ function renderConsent(opts: {
   .approve { background: #4945ff; color: #fff; border: 0; margin-right: 8px; }
   .deny { background: #fff; border: 1px solid #d0d0d0; color: #1f1f1f; }
   .resource { color: #666; font-size: 13px; }
+  .warn { background: #fff4e5; border: 1px solid #f5c26b; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
 </style>
 </head>
 <body>
   <h1>Authorize <span class="client">${htmlEscape(opts.clientName)}</span></h1>
+  ${
+    opts.unverified
+      ? `<p class="warn">This client registered itself and has not been approved by an administrator yet. Its name is self-reported — only approve if you started this connection and recognise where it sends you.</p>`
+      : ''
+  }
+  <p>After approval you will be sent to <strong>${htmlEscape(opts.redirectTarget)}</strong>.</p>
   <p>This MCP client is requesting the following permissions on <code class="resource">${htmlEscape(opts.resource)}</code>:</p>
   <ul>${scopes}</ul>
   <form method="POST" action="/oauth/consent">

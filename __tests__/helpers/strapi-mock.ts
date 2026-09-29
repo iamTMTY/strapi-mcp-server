@@ -24,25 +24,18 @@ export interface MockQuery {
 }
 
 export const DEFAULT_MCP_CONFIG: McpConfig = {
-  enabled: true,
   resourceUrl: 'http://localhost:1337/mcp',
   allowedOrigins: ['http://localhost:1337'],
   oauth: {
     mode: 'embedded',
     accessTokenTtlSec: 600,
     refreshTokenTtlSec: 86400,
+    refreshFamilyMaxAgeSec: 30 * 86400,
     authCodeTtlSec: 60,
     ssoCookieTtlSec: 900,
     dcr: { enabled: false, ratelimitPerHour: 60 },
     consent: { rememberDays: 0 },
     introspection: { allowedIps: ['127.0.0.1', '::1'] },
-  },
-  session: {
-    idleTtlMs: 30 * 60 * 1000,
-    hardTtlMs: 24 * 60 * 60 * 1000,
-    maxPerPrincipal: 10,
-    maxTotal: 1000,
-    sweepIntervalMs: 60 * 1000,
   },
   rateLimit: {
     perPrincipal: { capacity: 60, refillPerSec: 1 },
@@ -52,14 +45,17 @@ export const DEFAULT_MCP_CONFIG: McpConfig = {
     maxBytes: 10 * 1024 * 1024,
     mimeAllowlist: ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'],
     allowSvg: false,
+    ticketTtlSec: 600,
   },
   audit: {
     retentionDays: 90,
     redactKeyPatterns: ['password', 'token', 'secret', 'authorization', 'cookie', 'apikey'],
     drainIntervalMs: 2000,
     drainBatchSize: 50,
+    recordReads: true,
   },
   tools: { enabled: {} },
+  requestTimeoutMs: 60_000,
 };
 
 export function makeStrapi(opts: MockOptions = {}): Core.Strapi {
@@ -83,9 +79,7 @@ export function makeStrapi(opts: MockOptions = {}): Core.Strapi {
     },
     db: { query },
     config: {
-      get: jest.fn((key: string) =>
-        key === 'plugin::mcp-server' ? config : undefined
-      ),
+      get: jest.fn((key: string) => (key === 'plugin::mcp-server' ? config : undefined)),
     },
     plugin: jest.fn((name: string) => ({
       service: (svc: string) => {
@@ -108,7 +102,6 @@ function mergeConfig(base: McpConfig, override: Partial<McpConfig>): McpConfig {
     ...base,
     ...override,
     oauth: { ...base.oauth, ...(override.oauth ?? {}) },
-    session: { ...base.session, ...(override.session ?? {}) },
     rateLimit: { ...base.rateLimit, ...(override.rateLimit ?? {}) },
     upload: { ...base.upload, ...(override.upload ?? {}) },
     audit: { ...base.audit, ...(override.audit ?? {}) },

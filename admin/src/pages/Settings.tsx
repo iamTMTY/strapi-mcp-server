@@ -4,7 +4,6 @@ import { useMcpApi } from '../lib/api';
 import { PageHeader } from '../components/PageHeader';
 
 interface McpConfig {
-  enabled: boolean;
   resourceUrl: string;
   allowedOrigins: string[];
   oauth: {
@@ -22,13 +21,6 @@ interface McpConfig {
       adminLookupClaim?: string;
       enforceScopes?: boolean;
     };
-  };
-  session: {
-    idleTtlMs: number;
-    hardTtlMs: number;
-    maxPerPrincipal: number;
-    maxTotal: number;
-    sweepIntervalMs: number;
   };
   rateLimit: {
     perPrincipal: { capacity: number; refillPerSec: number };
@@ -50,11 +42,6 @@ interface McpConfig {
     enabled: boolean;
     url: string;
     keyPrefix?: string;
-    instanceId?: string;
-    internalAddress?: string;
-    internalSecret?: string;
-    heartbeatIntervalMs?: number;
-    heartbeatTtlMs?: number;
   };
 }
 
@@ -163,8 +150,8 @@ export function Settings(): JSX.Element {
         <Flex direction="column" gap={6} alignItems="stretch">
           <Box background="neutral150" padding={4} hasRadius>
             <Typography variant="omega" textColor="neutral700">
-              These values are configured in <code>config/plugins.js</code>. Secrets
-              (Redis password, internal secret) are masked.
+              These values are configured in <code>config/plugins.js</code>. Secrets (the Redis
+              password) are masked.
             </Typography>
           </Box>
 
@@ -172,9 +159,9 @@ export function Settings(): JSX.Element {
             <Grid.Root gap={5}>
               <Grid.Item col={4} s={12} direction="column" alignItems="stretch">
                 <Field
-                  label="Enabled"
-                  value={cfg.enabled}
-                  hint="Master switch. When false, /mcp and /oauth/* are unmounted and the plugin does nothing."
+                  label="Configured"
+                  value={!!cfg.resourceUrl}
+                  hint="The plugin serves /mcp and /oauth/* only once resourceUrl is set. To turn it off, set 'mcp-server': { enabled: false } in config/plugins."
                 />
               </Grid.Item>
               <Grid.Item col={8} s={12} direction="column" alignItems="stretch">
@@ -294,46 +281,6 @@ export function Settings(): JSX.Element {
             </Grid.Root>
           </Card>
 
-          <Card title="Sessions">
-            <Grid.Root gap={5}>
-              <Grid.Item col={3} s={6} xs={12} direction="column" alignItems="stretch">
-                <Field
-                  label="Idle TTL (ms)"
-                  value={cfg.session.idleTtlMs}
-                  hint="A session is evicted if it sees no traffic for this long."
-                />
-              </Grid.Item>
-              <Grid.Item col={3} s={6} xs={12} direction="column" alignItems="stretch">
-                <Field
-                  label="Hard TTL (ms)"
-                  value={cfg.session.hardTtlMs}
-                  hint="A session is force-closed at this age regardless of activity."
-                />
-              </Grid.Item>
-              <Grid.Item col={3} s={6} xs={12} direction="column" alignItems="stretch">
-                <Field
-                  label="Max per principal"
-                  value={cfg.session.maxPerPrincipal}
-                  hint="Cap on concurrent sessions per admin user. Oldest is evicted past this."
-                />
-              </Grid.Item>
-              <Grid.Item col={3} s={6} xs={12} direction="column" alignItems="stretch">
-                <Field
-                  label="Max total"
-                  value={cfg.session.maxTotal}
-                  hint="Cap on concurrent sessions per Node process. New connects beyond this get 503."
-                />
-              </Grid.Item>
-              <Grid.Item col={3} s={6} xs={12} direction="column" alignItems="stretch">
-                <Field
-                  label="Sweep interval (ms)"
-                  value={cfg.session.sweepIntervalMs}
-                  hint="How often the in-process sweeper scans for expired sessions to evict."
-                />
-              </Grid.Item>
-            </Grid.Root>
-          </Card>
-
           <Card title="Rate limit">
             <Grid.Root gap={5}>
               <Grid.Item col={6} s={12} direction="column" alignItems="stretch">
@@ -373,7 +320,7 @@ export function Settings(): JSX.Element {
                 <Field
                   label="Max bytes"
                   value={cfg.upload.maxBytes}
-                  hint="Largest single file accepted by strapi.media.upload."
+                  hint="Largest single file accepted by strapi_media_upload."
                 />
               </Grid.Item>
               <Grid.Item col={4} s={6} xs={12} direction="column" alignItems="stretch">
@@ -439,12 +386,12 @@ export function Settings(): JSX.Element {
             </Grid.Root>
           </Card>
 
-          <Card title="Redis (horizontal scale)">
+          <Card title="Redis (shared rate limits)">
             {!cfg.redis ? (
               <Typography variant="omega" textColor="neutral600">
-                Redis is not configured. The plugin runs single-instance with process-local
-                state. Add a <code>redis</code> block to plugin config to share rate-limit
-                buckets across nodes (and optionally enable session routing).
+                Redis is not configured. Rate limits are per process. The MCP transport is
+                stateless, so multiple instances work without it; add a <code>redis</code>
+                block only to share rate-limit buckets across nodes.
               </Typography>
             ) : (
               <Grid.Root gap={5}>
@@ -467,41 +414,6 @@ export function Settings(): JSX.Element {
                     label="Key prefix"
                     value={cfg.redis.keyPrefix ?? ''}
                     hint="Prefix on every Redis key this plugin creates. Helps coexist with other apps on a shared Redis."
-                  />
-                </Grid.Item>
-                <Grid.Item col={6} s={12} direction="column" alignItems="stretch">
-                  <Field
-                    label="Instance ID"
-                    value={cfg.redis.instanceId ?? ''}
-                    hint="This Node process's identifier in the cluster. Auto-generated when blank."
-                  />
-                </Grid.Item>
-                <Grid.Item col={6} s={12} direction="column" alignItems="stretch">
-                  <Field
-                    label="Internal address"
-                    value={cfg.redis.internalAddress ?? ''}
-                    hint="Internal URL peers use to proxy session traffic to this instance. Setting this AND the secret enables cross-instance session routing — any node can serve any session."
-                  />
-                </Grid.Item>
-                <Grid.Item col={6} s={12} direction="column" alignItems="stretch">
-                  <Field
-                    label="Internal secret"
-                    value={cfg.redis.internalSecret ?? ''}
-                    hint="Shared HMAC secret used to authenticate cross-instance proxy calls. Must be at least 32 high-entropy characters. Stored value masked here."
-                  />
-                </Grid.Item>
-                <Grid.Item col={6} s={12} direction="column" alignItems="stretch">
-                  <Field
-                    label="Heartbeat interval (ms)"
-                    value={cfg.redis.heartbeatIntervalMs ?? 10000}
-                    hint="How often this instance refreshes its alive-key. Peers use this to know which instances are reachable."
-                  />
-                </Grid.Item>
-                <Grid.Item col={6} s={12} direction="column" alignItems="stretch">
-                  <Field
-                    label="Heartbeat TTL (ms)"
-                    value={cfg.redis.heartbeatTtlMs ?? 30000}
-                    hint="Lifetime of the heartbeat key. Should be at least 3x the interval to avoid spurious 'instance is dead' detections on transient hiccups."
                   />
                 </Grid.Item>
               </Grid.Root>

@@ -1,6 +1,7 @@
 'use strict';
 
-const originPolicy = ['plugin::mcp-server.origin'];
+const originPolicy = ['plugin::mcp-server.configured', 'plugin::mcp-server.origin'];
+const configuredOnly = ['plugin::mcp-server.configured'];
 
 // type: 'admin' + prefix: '' mounts at the host root — required so the
 // well-known URLs and /oauth/* paths match what AS metadata advertises.
@@ -12,19 +13,19 @@ export default {
       method: 'GET',
       path: '/.well-known/oauth-protected-resource',
       handler: 'metadata.protectedResource',
-      config: { auth: false, policies: [] },
+      config: { auth: false, policies: configuredOnly },
     },
     {
       method: 'GET',
       path: '/.well-known/oauth-authorization-server',
       handler: 'metadata.authorizationServer',
-      config: { auth: false, policies: [] },
+      config: { auth: false, policies: configuredOnly },
     },
     {
       method: 'GET',
       path: '/oauth/jwks',
       handler: 'metadata.jwks',
-      config: { auth: false, policies: [] },
+      config: { auth: false, policies: configuredOnly },
     },
     {
       method: 'GET',
@@ -60,7 +61,7 @@ export default {
       method: 'POST',
       path: '/oauth/introspect',
       handler: 'introspect.introspect',
-      config: { auth: false, policies: [] },
+      config: { auth: false, policies: configuredOnly },
     },
     {
       method: 'POST',

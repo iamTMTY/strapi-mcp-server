@@ -7,6 +7,7 @@ import oauthRefreshToken from './oauth-refresh-token';
 import oauthRevocation from './oauth-revocation';
 import oauthConsent from './oauth-consent';
 import oauthSigningKey from './oauth-signing-key';
+import uploadTicket from './upload-ticket';
 
 export default {
   'audit-log': auditLog,
@@ -16,4 +17,5 @@ export default {
   'oauth-revocation': oauthRevocation,
   'oauth-consent': oauthConsent,
   'oauth-signing-key': oauthSigningKey,
+  'upload-ticket': uploadTicket,
 };

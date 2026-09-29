@@ -19,18 +19,16 @@ interface TokenRequestBody {
   scope?: string;
 }
 
-function error(
-  ctx: Context,
-  status: number,
-  code: string,
-  description?: string
-): void {
+function error(ctx: Context, status: number, code: string, description?: string): void {
   ctx.status = status;
   ctx.set('Cache-Control', 'no-store');
   ctx.body = { error: code, ...(description ? { error_description: description } : {}) };
 }
 
-function readClientCreds(ctx: Context, body: TokenRequestBody): {
+function readClientCreds(
+  ctx: Context,
+  body: TokenRequestBody
+): {
   clientId?: string;
   clientSecret?: string;
 } {
@@ -131,6 +129,9 @@ async function handleAuthCode(
     adminUserId: consumed.adminUserId,
     clientId: client.clientId,
     scope: scopes,
+    // Fixed atomically when the code was consumed, so a concurrent replay can
+    // revoke this family even before these tokens exist.
+    familyId: consumed.familyId ?? undefined,
   });
   await clientsSvc.touchLastUsed(client.clientId);
 
@@ -138,9 +139,7 @@ async function handleAuthCode(
   ctx.body = {
     access_token: minted.accessToken,
     token_type: 'Bearer',
-    expires_in: Math.floor(
-      (minted.accessTokenExpiresAt.getTime() - Date.now()) / 1000
-    ),
+    expires_in: Math.floor((minted.accessTokenExpiresAt.getTime() - Date.now()) / 1000),
     refresh_token: minted.refreshToken,
     scope: scopeString(scopes),
   };
@@ -173,7 +172,13 @@ async function handleRefresh(
     return error(ctx, 400, 'invalid_grant');
   }
 
-  let scopes = parseScope(consumed.scope);
+  // Intersect with the client's *current* grant so an admin narrowing the
+  // client's scopes takes effect on the next refresh, not never.
+  let scopes = parseScope(consumed.scope).filter((s) => client.scopes.includes(s));
+  if (scopes.length === 0) {
+    await tokensSvc.revokeFamily(consumed.familyId);
+    return error(ctx, 400, 'invalid_grant', 'client no longer holds any granted scope');
+  }
   if (body.scope) {
     const requested = parseScope(body.scope);
     if (!isSubsetOf(requested, scopes as Scope[])) {
@@ -188,6 +193,7 @@ async function handleRefresh(
     scope: scopes,
     familyId: consumed.familyId,
     parentJti: consumed.parentJti ?? undefined,
+    familyExpiresAt: consumed.familyExpiresAt ? new Date(consumed.familyExpiresAt) : null,
   });
 
   await tokensSvc.markRotated(consumed.id, tokensSvc.hash(minted.refreshToken));
@@ -197,9 +203,7 @@ async function handleRefresh(
   ctx.body = {
     access_token: minted.accessToken,
     token_type: 'Bearer',
-    expires_in: Math.floor(
-      (minted.accessTokenExpiresAt.getTime() - Date.now()) / 1000
-    ),
+    expires_in: Math.floor((minted.accessTokenExpiresAt.getTime() - Date.now()) / 1000),
     refresh_token: minted.refreshToken,
     scope: scopeString(scopes),
   };

@@ -27,6 +27,7 @@ function makeController(opts?: {
   dcrEnabled?: boolean;
   externalMode?: boolean;
   rateLimitWait?: number;
+  allowedRedirectHosts?: string[];
 }) {
   const audit = { record: jest.fn() };
   const rateLimiter = { checkDcr: jest.fn(async () => opts?.rateLimitWait ?? 0) };
@@ -50,11 +51,22 @@ function makeController(opts?: {
         refreshTokenTtlSec: 86400,
         authCodeTtlSec: 60,
         ssoCookieTtlSec: 900,
-        dcr: { enabled: opts?.dcrEnabled ?? true, ratelimitPerHour: 60 },
+        refreshFamilyMaxAgeSec: 30 * 86400,
+        dcr: {
+          enabled: opts?.dcrEnabled ?? true,
+          ratelimitPerHour: 60,
+          allowedRedirectHosts: opts?.allowedRedirectHosts,
+        },
         consent: { rememberDays: 0 },
         introspection: { allowedIps: ['127.0.0.1'] },
         ...(opts?.externalMode
-          ? { external: { issuer: 'https://idp.example.com', jwksUri: 'https://idp.example.com/jwks' } }
+          ? {
+              external: {
+                issuer: 'https://idp.example.com',
+                jwksUri: 'https://idp.example.com/jwks',
+                audience: 'mcp',
+              },
+            }
           : {}),
       },
     },
@@ -138,9 +150,7 @@ describe('oauth/register controller', () => {
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await controller.register(c as any);
-    expect(clientsCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ isConfidential: true })
-    );
+    expect(clientsCreate).toHaveBeenCalledWith(expect.objectContaining({ isConfidential: true }));
     expect(c.status).toBe(201);
     expect((c.body as Record<string, unknown>).client_secret).toBe('raw-secret');
   });
@@ -162,9 +172,15 @@ describe('oauth/register controller', () => {
     // Just re-build with a throwing create
     const audit = { record: jest.fn() };
     const rl = { checkDcr: jest.fn(async () => 0) };
-    const throwingClients = { create: jest.fn(async () => { throw new Error('invalid redirectUri'); }) };
+    const throwingClients = {
+      create: jest.fn(async () => {
+        throw new Error('invalid redirectUri');
+      }),
+    };
     const s = makeStrapi({
-      config: { oauth: { mode: 'embedded', dcr: { enabled: true, ratelimitPerHour: 60 } } as never },
+      config: {
+        oauth: { mode: 'embedded', dcr: { enabled: true, ratelimitPerHour: 60 } } as never,
+      },
       services: { audit, 'rate-limiter': rl, clients: throwingClients },
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -174,5 +190,61 @@ describe('oauth/register controller', () => {
     await ctl.register(c as any);
     expect(c.status).toBe(400);
     expect((c.body as Record<string, string>).error).toBe('invalid_client_metadata');
+  });
+});
+
+describe('DCR redirect host allowlist', () => {
+  it('rejects hosts outside dcr.allowedRedirectHosts but allows loopback', async () => {
+    const { controller, clientsCreate } = makeController({ allowedRedirectHosts: ['claude.ai'] });
+    const bad = ctx({ client_name: 'x', redirect_uris: ['https://evil.example/cb'] });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await controller.register(bad as any);
+    expect(bad.status).toBe(400);
+    expect(clientsCreate).not.toHaveBeenCalled();
+
+    const ok = ctx({
+      client_name: 'x',
+      redirect_uris: ['https://claude.ai/cb', 'http://localhost:5555/cb'],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await controller.register(ok as any);
+    expect(ok.status).toBe(201);
+  });
+
+  it('rejects oversized metadata', async () => {
+    const { controller } = makeController();
+    const c = ctx({ client_name: 'x'.repeat(201), redirect_uris: ['http://localhost/cb'] });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await controller.register(c as any);
+    expect(c.status).toBe(400);
+  });
+});
+
+describe('DCR default scopes', () => {
+  it('grants only non-destructive scopes when none are requested', async () => {
+    const { controller, clientsCreate } = makeController();
+    const c = ctx({ client_name: 'x', redirect_uris: ['http://localhost/cb'] });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await controller.register(c as any);
+    const scopes = (clientsCreate.mock.calls[0] as unknown as [{ scopes: string[] }])[0].scopes;
+    expect(scopes).toEqual([
+      'strapi:content:read',
+      'strapi:content:write',
+      'strapi:media:read',
+      'strapi:media:write',
+    ]);
+  });
+
+  it('grants destructive scopes only when explicitly requested', async () => {
+    const { controller, clientsCreate } = makeController();
+    const c = ctx({
+      client_name: 'x',
+      redirect_uris: ['http://localhost/cb'],
+      scope: 'strapi:content:read strapi:content:delete',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await controller.register(c as any);
+    const scopes = (clientsCreate.mock.calls[0] as unknown as [{ scopes: string[] }])[0].scopes;
+    expect(scopes).toEqual(['strapi:content:read', 'strapi:content:delete']);
   });
 });

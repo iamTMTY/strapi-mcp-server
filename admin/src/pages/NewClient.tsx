@@ -13,13 +13,14 @@ import {
 import { ArrowLeft } from '@strapi/icons';
 import { useMcpApi } from '../lib/api';
 import { PageHeader } from '../components/PageHeader';
+import {
+  ALL_SCOPES as SERVER_SCOPES,
+  DEFAULT_SCOPES,
+  SCOPE_LABELS,
+} from '../../../server/src/services/oauth/scopes';
 
-const ALL_SCOPES = [
-  { id: 'strapi:content:read', label: 'Read content (list types, schemas, entries)' },
-  { id: 'strapi:content:write', label: 'Create / update content entries (draft only)' },
-  { id: 'strapi:media:read', label: 'List media files' },
-  { id: 'strapi:media:write', label: 'Upload media files' },
-];
+// Single source of truth shared with the server (consent screen, validation).
+const ALL_SCOPES = SERVER_SCOPES.map((id) => ({ id, label: SCOPE_LABELS[id] }));
 
 interface CreatedResponse {
   client: { clientId: string; clientName: string };
@@ -33,7 +34,8 @@ export function NewClient(): JSX.Element {
   const [name, setName] = useState('');
   const [redirects, setRedirects] = useState('');
   const [isConfidential, setIsConfidential] = useState(false);
-  const [scopes, setScopes] = useState<string[]>(ALL_SCOPES.map((s) => s.id));
+  // Destructive scopes (publish / delete) are opt-in.
+  const [scopes, setScopes] = useState<string[]>([...DEFAULT_SCOPES]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<CreatedResponse | null>(null);
@@ -151,9 +153,7 @@ export function NewClient(): JSX.Element {
                   <TextInput
                     name="clientName"
                     value={name}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setName(e.target.value)
-                    }
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                     placeholder="e.g. Claude Desktop"
                   />
                 </Box>
@@ -184,15 +184,15 @@ export function NewClient(): JSX.Element {
             </Typography>
             <Box paddingTop={1} paddingBottom={1}>
               <Typography variant="pi" textColor="neutral600">
-                Leave blank for CLI clients (Claude Code, Cursor, Codex, etc.) — defaults to <code>http://localhost/callback</code>, any loopback port matches. One per line, exact match for non-loopback URIs.
+                Leave blank for CLI clients (Claude Code, Cursor, Codex, etc.) — defaults to{' '}
+                <code>http://localhost/callback</code>, any loopback port matches. One per line,
+                exact match for non-loopback URIs.
               </Typography>
             </Box>
             <Textarea
               name="redirectUris"
               value={redirects}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                setRedirects(e.target.value)
-              }
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRedirects(e.target.value)}
               placeholder="http://localhost/callback"
               rows={3}
             />

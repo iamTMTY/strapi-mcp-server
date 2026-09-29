@@ -17,6 +17,7 @@ export interface AuthCodeRow {
   codeChallengeMethod: 'S256';
   resource: string;
   used: boolean;
+  familyId: string | null;
   expiresAt: string;
 }
 
@@ -53,26 +54,44 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     },
 
     /**
-     * Single-use, race-safe: read-then-update-where-used-false. Returns the
-     * row if it was the consumer; null otherwise (already used, expired, or
-     * not found). Caller is responsible for triggering family revocation on
-     * a "used" replay.
+     * Single-use, race-safe. Returns the row (with the refresh `familyId`
+     * the caller must mint into) if this caller consumed it; 'replayed' if it
+     * was already used — sequentially or concurrently — after revoking the
+     * family the winning redemption mints into; null if unknown or expired.
      */
     async consume(code: string): Promise<AuthCodeRow | 'replayed' | null> {
       const codeHash = sha256(code);
-      const row = (await strapi.db.query(UID).findOne({ where: { codeHash } })) as AuthCodeRow | null;
+      const row = (await strapi.db
+        .query(UID)
+        .findOne({ where: { codeHash } })) as AuthCodeRow | null;
       if (!row) return null;
       if (new Date(row.expiresAt).getTime() < Date.now()) return null;
-      if (row.used) return 'replayed';
+      if (row.used) {
+        // RFC 6749 §4.1.2: a replayed code should revoke what it minted.
+        if (row.familyId) {
+          await strapi.plugin('mcp-server').service('tokens').revokeFamily(row.familyId);
+        }
+        return 'replayed';
+      }
 
-      // Atomic-ish: update where used=false, then check rowcount via re-read.
-      await strapi.db.query(UID).update({
+      // Atomic claim. The winner also fixes the refresh family id in the same
+      // statement, so a racing loser can always find — and revoke — it, even
+      // before the winner has minted anything.
+      const familyId = randomBytes(16).toString('hex');
+      const { count } = await strapi.db.query(UID).updateMany({
         where: { id: row.id, used: false },
-        data: { used: true },
+        data: { used: true, familyId },
       });
-      const after = (await strapi.db.query(UID).findOne({ where: { id: row.id } })) as AuthCodeRow | null;
-      if (!after || !after.used) return null;
-      return after;
+      if (count !== 1) {
+        const winner = (await strapi.db
+          .query(UID)
+          .findOne({ where: { id: row.id } })) as AuthCodeRow | null;
+        if (winner?.familyId) {
+          await strapi.plugin('mcp-server').service('tokens').revokeFamily(winner.familyId);
+        }
+        return 'replayed';
+      }
+      return { ...row, used: true, familyId };
     },
   };
 };
