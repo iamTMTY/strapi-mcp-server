@@ -4,6 +4,7 @@ import type { Core } from '@strapi/strapi';
 import type { Context } from 'koa';
 import { randomBytes } from 'crypto';
 import { parseScope, scopeString, isSubsetOf, SCOPE_LABELS } from '../../services/oauth/scopes';
+import { grantableScopes } from '../../services/tools';
 import { canonicalResourceUrl } from '../../services/oauth/audience';
 import { ensureEmbeddedMode } from './mode-guard';
 
@@ -88,7 +89,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       return renderError(ctx, 400, 'invalid_request', 'redirect_uri not allowed for this client');
     }
 
-    const requestedScopes = parseScope(q.scope);
+    const grantable = grantableScopes(strapi);
+    const requestedScopes = parseScope(q.scope).filter((s) => grantable.includes(s));
     if (requestedScopes.length === 0) {
       return renderError(ctx, 400, 'invalid_scope', 'no valid scopes requested');
     }
@@ -240,7 +242,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     if (body.resource !== canonicalResourceUrl(strapi)) {
       return renderError(ctx, 400, 'invalid_target', 'resource mismatch');
     }
-    const scopes = parseScope(body.scope);
+    const grantable = grantableScopes(strapi);
+    const scopes = parseScope(body.scope).filter((s) => grantable.includes(s));
     if (scopes.length === 0 || !isSubsetOf(scopes, client.scopes)) {
       return renderError(ctx, 400, 'invalid_scope', 'scope mismatch');
     }

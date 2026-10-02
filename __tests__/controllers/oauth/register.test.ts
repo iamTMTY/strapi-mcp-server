@@ -28,6 +28,7 @@ function makeController(opts?: {
   externalMode?: boolean;
   rateLimitWait?: number;
   allowedRedirectHosts?: string[];
+  toolsEnabled?: Record<string, boolean>;
 }) {
   const audit = { record: jest.fn() };
   const rateLimiter = { checkDcr: jest.fn(async () => opts?.rateLimitWait ?? 0) };
@@ -45,6 +46,7 @@ function makeController(opts?: {
   }));
   const strapi = makeStrapi({
     config: {
+      tools: { enabled: opts?.toolsEnabled ?? {} },
       oauth: {
         mode: opts?.externalMode ? 'external' : 'embedded',
         accessTokenTtlSec: 600,
@@ -74,6 +76,7 @@ function makeController(opts?: {
       audit,
       'rate-limiter': rateLimiter,
       clients: { create: clientsCreate },
+      'tool-registry': { list: () => [] },
     },
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -181,7 +184,12 @@ describe('oauth/register controller', () => {
       config: {
         oauth: { mode: 'embedded', dcr: { enabled: true, ratelimitPerHour: 60 } } as never,
       },
-      services: { audit, 'rate-limiter': rl, clients: throwingClients },
+      services: {
+        audit,
+        'rate-limiter': rl,
+        clients: throwingClients,
+        'tool-registry': { list: () => [] },
+      },
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ctl = registerFactory({ strapi: s } as any);
@@ -235,8 +243,36 @@ describe('DCR default scopes', () => {
     ]);
   });
 
-  it('grants destructive scopes only when explicitly requested', async () => {
+  it('drops destructive scopes whose tools are not enabled in config', async () => {
     const { controller, clientsCreate } = makeController();
+    const c = ctx({
+      client_name: 'x',
+      redirect_uris: ['http://localhost/cb'],
+      scope: 'strapi:content:read strapi:content:delete',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await controller.register(c as any);
+    const scopes = (clientsCreate.mock.calls[0] as unknown as [{ scopes: string[] }])[0].scopes;
+    expect(scopes).toEqual(['strapi:content:read']);
+  });
+
+  it('rejects registration when no requested scope is grantable', async () => {
+    const { controller, clientsCreate } = makeController();
+    const c = ctx({
+      client_name: 'x',
+      redirect_uris: ['http://localhost/cb'],
+      scope: 'strapi:content:delete',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await controller.register(c as any);
+    expect(c.status).toBe(400);
+    expect(clientsCreate).not.toHaveBeenCalled();
+  });
+
+  it('grants destructive scopes when requested and enabled in config', async () => {
+    const { controller, clientsCreate } = makeController({
+      toolsEnabled: { strapi_content_delete_entry: true },
+    });
     const c = ctx({
       client_name: 'x',
       redirect_uris: ['http://localhost/cb'],

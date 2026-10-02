@@ -38,9 +38,7 @@ Strapi 5 ships an [MCP server](https://docs.strapi.io/cms/features/strapi-mcp-se
 
 ## Quick setup
 
-By default, clients connect with a pre-registered `client_id` + `client_secret` that you create in the Strapi admin UI. All major AI clients support this. The `client_secret` protects refresh tokens: a leaked refresh token can't be used without it.
-
-If you'd rather skip manual client creation, enable Dynamic Client Registration (DCR) so clients self-register on first connect — see [step 3](#3-optional-create-a-confidential-client).
+By default, clients self-register on first connect through Dynamic Client Registration (DCR) and get read/write scopes only. For a pre-registered `client_id` + `client_secret` instead — the `client_secret` protects refresh tokens, so a leaked refresh token can't be used without it — create a client in the Strapi admin UI ([step 3](#3-optional-create-a-confidential-client)) and set `oauth: { dcr: { enabled: false } }` to turn self-registration off.
 
 ### 1. Install
 
@@ -69,12 +67,12 @@ Restart Strapi. The plugin is **inactive until `resourceUrl` is set**: installin
 
 ### 3. (Optional) Create a confidential client
 
-Skip this step only if you've enabled DCR (`oauth: { dcr: { enabled: true } }`). Otherwise, once:
+Skip this step if you use DCR (on by default). Otherwise, once:
 
 1. Strapi admin → **MCP Server → Clients → New client**
 2. **Name**: anything (e.g. `Claude Code — my-laptop`)
 3. **Redirect URIs**: leave blank — defaults to `http://localhost/callback` and accepts any loopback port (RFC 8252 §7.3). Only fill in for non-loopback web clients.
-4. **Scopes**: read/write are ticked by default; tick **publish** and **delete** scopes only if the AI should be able to do that.
+4. **Scopes**: read/write are ticked by default; tick **publish** and **delete** scopes only if the AI should be able to do that. Those scopes are only granted once their tools are enabled in `tools.enabled` (see [Tools](#tools)).
 5. **Confidential**: tick "Generate client secret" → **Save**, then copy the **Client ID** and **Client Secret** (shown once).
 
 ### 4. Connect your AI client
@@ -176,7 +174,17 @@ Trigger the connection (Claude Code: `claude` → `/mcp` → **strapi**). A brow
 
 ## Tools
 
-22 tools, listed per request: a tool only appears if the token has its **scope** _and_ the admin's Strapi role can use it somewhere (e.g. no media tools for a role without Media Library access). Every call is re-checked anyway.
+22 tools, listed per request: a tool only appears if it is **enabled in config**, the token has its **scope** _and_ the admin's Strapi role can use it somewhere (e.g. no media tools for a role without Media Library access). Every call is re-checked anyway.
+
+Publish, unpublish and delete tools (`strapi_content_publish_entry`, `strapi_content_unpublish_entry`, `strapi_content_delete_entry`, `strapi_media_delete`, `strapi_media_delete_folder`) are **disabled by default**. The plugin config is the source of truth: a scope is only advertised, registered, consented to or honoured on a token when at least one enabled tool needs it, whatever the client asked for and whatever the admin's role allows. Enabling a tool does not bypass RBAC — the admin's role must still allow the action.
+
+```js
+'mcp-server': {
+  config: {
+    tools: { enabled: { strapi_content_publish_entry: true } },
+  },
+},
+```
 
 ### Content
 
@@ -281,41 +289,41 @@ All keys go under the plugin's `config: { ... }` block.
 
 ### OAuth (`oauth.*`)
 
-| Option                            | Type                       | Default                | Description                                                                                                                                                |
-| --------------------------------- | -------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `oauth.mode`                      | `'embedded' \| 'external'` | `'embedded'`           | `embedded` runs the Authorization Server in the plugin; `external` delegates to your IdP — see below.                                                      |
-| `oauth.accessTokenTtlSec`         | `number` (60–3600)         | `600`                  | Access-token lifetime.                                                                                                                                     |
-| `oauth.refreshTokenTtlSec`        | `number` (≥300)            | `86400`                | Refresh-token lifetime. Rotates on every use; reuse or concurrent use revokes the family.                                                                  |
-| `oauth.refreshFamilyMaxAgeSec`    | `number` (≥ refresh TTL)   | `2592000` (30 d)       | Absolute lifetime of a login; rotation can't extend past it.                                                                                               |
-| `oauth.authCodeTtlSec`            | `number` (10–600)          | `60`                   | Authorization-code lifetime. Codes are single-use; a replayed code revokes the tokens it produced.                                                         |
-| `oauth.ssoCookieTtlSec`           | `number`                   | `900`                  | Cookie tying the admin login to the consent screen (also invalidated by admin logout).                                                                     |
-| `oauth.dcr.enabled`               | `boolean`                  | `false`                | Allow `POST /oauth/register` so clients self-register. Clients that don't request scopes get read/write only; publish/delete must be requested explicitly. |
-| `oauth.dcr.ratelimitPerHour`      | `number`                   | `60`                   | Max DCR registrations per IP per hour.                                                                                                                     |
-| `oauth.dcr.allowedRedirectHosts`  | `string[]`                 | unset                  | Only let self-registered clients redirect to these hosts (loopback always allowed), e.g. `['claude.ai']`. Strongly recommended with DCR.                   |
-| `oauth.consent.rememberDays`      | `number`                   | `0`                    | Skip the consent prompt for an approved admin/client/scope set. `0` = always prompt.                                                                       |
-| `oauth.introspection.allowedIps`  | `string[]`                 | `['127.0.0.1', '::1']` | IPs allowed to call `POST /oauth/introspect`.                                                                                                              |
-| `oauth.external.issuer`           | `string`                   | —                      | External issuer (required in `external` mode). Must match `iss` byte-for-byte.                                                                             |
-| `oauth.external.jwksUri`          | `string`                   | —                      | External JWKS URL.                                                                                                                                         |
-| `oauth.external.audience`         | `string \| string[]`       | —                      | **Required** in `external` mode: expected `aud`.                                                                                                           |
-| `oauth.external.adminLookupClaim` | `string`                   | `'email'`              | Claim mapped to a Strapi admin (`'email'` or `'username'`).                                                                                                |
-| `oauth.external.enforceScopes`    | `boolean`                  | `false`                | Require `strapi:*` scopes in the JWT.                                                                                                                      |
+| Option                            | Type                       | Default                | Description                                                                                                                                                                        |
+| --------------------------------- | -------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `oauth.mode`                      | `'embedded' \| 'external'` | `'embedded'`           | `embedded` runs the Authorization Server in the plugin; `external` delegates to your IdP — see below.                                                                              |
+| `oauth.accessTokenTtlSec`         | `number` (60–3600)         | `600`                  | Access-token lifetime.                                                                                                                                                             |
+| `oauth.refreshTokenTtlSec`        | `number` (≥300)            | `86400`                | Refresh-token lifetime. Rotates on every use; reuse or concurrent use revokes the family.                                                                                          |
+| `oauth.refreshFamilyMaxAgeSec`    | `number` (≥ refresh TTL)   | `2592000` (30 d)       | Absolute lifetime of a login; rotation can't extend past it.                                                                                                                       |
+| `oauth.authCodeTtlSec`            | `number` (10–600)          | `60`                   | Authorization-code lifetime. Codes are single-use; a replayed code revokes the tokens it produced.                                                                                 |
+| `oauth.ssoCookieTtlSec`           | `number`                   | `900`                  | Cookie tying the admin login to the consent screen (also invalidated by admin logout).                                                                                             |
+| `oauth.dcr.enabled`               | `boolean`                  | `true`                 | Allow `POST /oauth/register` so clients self-register. Clients that don't request scopes get read/write only; publish/delete must be requested explicitly and their tools enabled. |
+| `oauth.dcr.ratelimitPerHour`      | `number`                   | `60`                   | Max DCR registrations per IP per hour.                                                                                                                                             |
+| `oauth.dcr.allowedRedirectHosts`  | `string[]`                 | unset                  | Only let self-registered clients redirect to these hosts (loopback always allowed), e.g. `['claude.ai']`. Strongly recommended with DCR.                                           |
+| `oauth.consent.rememberDays`      | `number`                   | `0`                    | Skip the consent prompt for an approved admin/client/scope set. `0` = always prompt.                                                                                               |
+| `oauth.introspection.allowedIps`  | `string[]`                 | `['127.0.0.1', '::1']` | IPs allowed to call `POST /oauth/introspect`.                                                                                                                                      |
+| `oauth.external.issuer`           | `string`                   | —                      | External issuer (required in `external` mode). Must match `iss` byte-for-byte.                                                                                                     |
+| `oauth.external.jwksUri`          | `string`                   | —                      | External JWKS URL.                                                                                                                                                                 |
+| `oauth.external.audience`         | `string \| string[]`       | —                      | **Required** in `external` mode: expected `aud`.                                                                                                                                   |
+| `oauth.external.adminLookupClaim` | `string`                   | `'email'`              | Claim mapped to a Strapi admin (`'email'` or `'username'`).                                                                                                                        |
+| `oauth.external.enforceScopes`    | `boolean`                  | `false`                | Require `strapi:*` scopes in the JWT.                                                                                                                                              |
 
 ### Rate limit, uploads, audit, tools
 
-| Option                                | Type       | Default                     | Description                                                               |
-| ------------------------------------- | ---------- | --------------------------- | ------------------------------------------------------------------------- |
-| `rateLimit.perPrincipal.capacity`     | `number`   | `60`                        | Burst per admin.                                                          |
-| `rateLimit.perPrincipal.refillPerSec` | `number`   | `1`                         | Steady-state requests/sec per admin.                                      |
-| `rateLimit.perIp.capacity`            | `number`   | `120`                       | Burst per IP.                                                             |
-| `rateLimit.perIp.refillPerSec`        | `number`   | `2`                         | Steady-state requests/sec per IP.                                         |
-| `upload.maxBytes`                     | `number`   | `10_485_760`                | Max upload size (10 MB).                                                  |
-| `upload.mimeAllowlist`                | `string[]` | (png, jpeg, webp, gif, pdf) | Accepted MIME types.                                                      |
-| `upload.allowSvg`                     | `boolean`  | `false`                     | Off because SVGs can carry XSS payloads.                                  |
-| `upload.ticketTtlSec`                 | `number`   | `600`                       | Lifetime (60–3600 s) of one-time upload URLs.                             |
-| `audit.retentionDays`                 | `number`   | `90`                        | Daily cron deletes older entries.                                         |
-| `audit.redactKeyPatterns`             | `string[]` | (password, token, …)        | Keys whose values are replaced with `[redacted]`.                         |
-| `audit.recordReads`                   | `boolean`  | `true`                      | Record successful read-only calls. Writes and errors are always recorded. |
-| `tools.enabled[<toolName>]`           | `boolean`  | `true`                      | Per-tool switch (0.1 dotted names are accepted as keys too).              |
+| Option                                | Type       | Default                                       | Description                                                               |
+| ------------------------------------- | ---------- | --------------------------------------------- | ------------------------------------------------------------------------- |
+| `rateLimit.perPrincipal.capacity`     | `number`   | `60`                                          | Burst per admin.                                                          |
+| `rateLimit.perPrincipal.refillPerSec` | `number`   | `1`                                           | Steady-state requests/sec per admin.                                      |
+| `rateLimit.perIp.capacity`            | `number`   | `120`                                         | Burst per IP.                                                             |
+| `rateLimit.perIp.refillPerSec`        | `number`   | `2`                                           | Steady-state requests/sec per IP.                                         |
+| `upload.maxBytes`                     | `number`   | `10_485_760`                                  | Max upload size (10 MB).                                                  |
+| `upload.mimeAllowlist`                | `string[]` | (png, jpeg, webp, gif, pdf)                   | Accepted MIME types.                                                      |
+| `upload.allowSvg`                     | `boolean`  | `false`                                       | Off because SVGs can carry XSS payloads.                                  |
+| `upload.ticketTtlSec`                 | `number`   | `600`                                         | Lifetime (60–3600 s) of one-time upload URLs.                             |
+| `audit.retentionDays`                 | `number`   | `90`                                          | Daily cron deletes older entries.                                         |
+| `audit.redactKeyPatterns`             | `string[]` | (password, token, …)                          | Keys whose values are replaced with `[redacted]`.                         |
+| `audit.recordReads`                   | `boolean`  | `true`                                        | Record successful read-only calls. Writes and errors are always recorded. |
+| `tools.enabled[<toolName>]`           | `boolean`  | `true` (read/write), `false` (publish/delete) | Per-tool switch (0.1 dotted names are accepted as keys too).              |
 
 ### Redis (`redis.*`, optional)
 

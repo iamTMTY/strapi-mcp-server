@@ -5,7 +5,7 @@ import { createContentTools } from './content';
 import { createMediaTools } from './media';
 import { getConfig } from '../../config';
 import { UPLOAD_ACTIONS, type PrincipalContext } from '../permissions';
-import type { Scope } from '../oauth/scopes';
+import { ALL_SCOPES, DEFAULT_SCOPES, type Scope } from '../oauth/scopes';
 import type { Capability, ToolDef } from './common';
 
 export type { ToolDef, ToolAuth, Capability } from './common';
@@ -23,9 +23,20 @@ function legacyName(name: string): string {
   return name.replace(/^strapi_(content|media)_/, 'strapi.$1.');
 }
 
-export function isToolEnabled(strapi: Core.Strapi, name: string): boolean {
+export function isToolEnabled(strapi: Core.Strapi, tool: Pick<ToolDef, 'name' | 'scope'>): boolean {
   const toggles = getConfig(strapi).tools.enabled;
-  return toggles[name] ?? toggles[legacyName(name)] ?? true;
+  return (
+    toggles[tool.name] ?? toggles[legacyName(tool.name)] ?? DEFAULT_SCOPES.includes(tool.scope)
+  );
+}
+
+export function grantableScopes(strapi: Core.Strapi): Scope[] {
+  const enabled = new Set(
+    allTools(strapi)
+      .filter((t) => isToolEnabled(strapi, t))
+      .map((t) => t.scope)
+  );
+  return ALL_SCOPES.filter((s) => enabled.has(s));
 }
 
 /**
@@ -67,6 +78,6 @@ export async function toolsFor(
 ): Promise<ToolDef[]> {
   const caps = await capabilitiesOf(strapi, auth.principal);
   return allTools(strapi).filter(
-    (t) => auth.scopes.includes(t.scope) && isToolEnabled(strapi, t.name) && caps.has(t.requires)
+    (t) => auth.scopes.includes(t.scope) && isToolEnabled(strapi, t) && caps.has(t.requires)
   );
 }
