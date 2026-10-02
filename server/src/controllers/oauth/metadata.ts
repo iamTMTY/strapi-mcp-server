@@ -3,7 +3,7 @@
 import type { Core } from '@strapi/strapi';
 import type { Context } from 'koa';
 import { authorizationServerUrl, canonicalResourceUrl } from '../../services/oauth/audience';
-import { ALL_SCOPES } from '../../services/oauth/scopes';
+import { grantableScopes } from '../../services/tools';
 import { getConfig } from '../../config';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
@@ -16,9 +16,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const cfg = getConfig(strapi);
     const resource = canonicalResourceUrl(strapi);
     const externalMode = cfg.oauth.mode === 'external' && !!cfg.oauth.external;
-    const asUrl = externalMode
-      ? cfg.oauth.external!.issuer
-      : authorizationServerUrl(strapi);
+    const asUrl = externalMode ? cfg.oauth.external!.issuer : authorizationServerUrl(strapi);
 
     const body: Record<string, unknown> = {
       resource,
@@ -33,7 +31,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // know about — they'd fail with `invalid_scope`.
     const advertiseScopes = !externalMode || cfg.oauth.external?.enforceScopes === true;
     if (advertiseScopes) {
-      body.scopes_supported = ALL_SCOPES;
+      body.scopes_supported = grantableScopes(strapi);
     }
 
     ctx.body = body;
@@ -63,7 +61,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
       grant_types_supported: ['authorization_code', 'refresh_token'],
       code_challenge_methods_supported: ['S256'],
       token_endpoint_auth_methods_supported: ['none', 'client_secret_basic', 'client_secret_post'],
-      scopes_supported: ALL_SCOPES,
+      scopes_supported: grantableScopes(strapi),
       response_modes_supported: ['query'],
     };
     if (cfg.oauth.dcr.enabled) {

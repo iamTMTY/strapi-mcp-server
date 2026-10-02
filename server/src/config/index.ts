@@ -99,15 +99,7 @@ const defaultConfig: McpConfig = {
     refreshFamilyMaxAgeSec: 30 * 86400,
     authCodeTtlSec: 60,
     ssoCookieTtlSec: 900,
-    // DCR off by default — admins create clients via the Clients page in the
-    // admin UI and inject `client_id` + `client_secret` into the AI client's
-    // config. All major MCP clients (Claude Code, Claude web, Codex via
-    // mcp-remote, opencode, Cursor) support pre-registered credentials, so DCR
-    // is an opt-in convenience for self-registration rather than the default.
-    // Set `enabled: true` to allow self-registration via `/oauth/register`
-    // (still rate-limited per IP and audited; the admin consent screen is the
-    // real security gate either way).
-    dcr: { enabled: false, ratelimitPerHour: 60 },
+    dcr: { enabled: true, ratelimitPerHour: 60 },
     consent: { rememberDays: 0 },
     introspection: { allowedIps: ['127.0.0.1', '::1'] },
   },

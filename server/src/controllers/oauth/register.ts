@@ -4,6 +4,7 @@ import type { Core } from '@strapi/strapi';
 import type { Context } from 'koa';
 import { getConfig } from '../../config';
 import { DEFAULT_SCOPES, parseScope, type Scope } from '../../services/oauth/scopes';
+import { grantableScopes } from '../../services/tools';
 import { ensureEmbeddedMode } from './mode-guard';
 
 /**
@@ -85,8 +86,15 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     const requestedScopes = parseScope(body.scope ?? '');
     // No scope requested → non-destructive defaults only; publish/delete must
     // be asked for explicitly (and are still subject to consent + RBAC).
-    const grantedScopes: Scope[] =
-      requestedScopes.length > 0 ? requestedScopes : [...DEFAULT_SCOPES];
+    const grantable = grantableScopes(strapi);
+    const grantedScopes: Scope[] = (
+      requestedScopes.length > 0 ? requestedScopes : [...DEFAULT_SCOPES]
+    ).filter((s) => grantable.includes(s));
+    if (grantedScopes.length === 0) {
+      ctx.status = 400;
+      ctx.body = { error: 'invalid_scope', error_description: 'no grantable scopes requested' };
+      return;
+    }
 
     try {
       const { client, clientSecret } = await strapi

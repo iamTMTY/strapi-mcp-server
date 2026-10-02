@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- **Publish and delete tools are disabled by default.** `strapi_content_publish_entry`, `strapi_content_unpublish_entry`, `strapi_content_delete_entry`, `strapi_media_delete` and `strapi_media_delete_folder` must be enabled in `tools.enabled`. The plugin config is now the source of truth for scopes: a scope is only advertised, granted through DCR, consented to or honoured on a token when an enabled tool needs it. This applies to DCR clients, admin-created clients and external mode alike. Enabling a tool still requires the admin's Strapi role to allow the action.
+- **DCR is enabled by default.** `oauth.dcr.enabled` now defaults to `true`; set it to `false` to require admin-created clients.
+
 ## 0.2.0
 
 A major security and feature release. It contains **breaking changes**; read [Upgrading](#upgrading-from-01x) before deploying.

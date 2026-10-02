@@ -2,8 +2,7 @@
 
 import type { Core } from '@strapi/strapi';
 import type { Context } from 'koa';
-import { ALL_SCOPES } from '../../services/oauth/scopes';
-import { allTools, isToolEnabled } from '../../services/tools';
+import { allTools, grantableScopes, isToolEnabled } from '../../services/tools';
 
 export default ({ strapi }: { strapi: Core.Strapi }) => ({
   list(ctx: Context): void {
@@ -14,9 +13,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
         description: t.description,
         scope: t.scope,
         annotations: t.annotations,
-        enabled: isToolEnabled(strapi, t.name),
+        enabled: isToolEnabled(strapi, t),
       })),
-      scopes: ALL_SCOPES,
+      scopes: grantableScopes(strapi),
     };
   },
 });

@@ -4,6 +4,7 @@ import type { Core } from '@strapi/strapi';
 import { errors } from '@strapi/utils';
 import { bearerChallenge } from '../services/oauth/errors';
 import { getConfig } from '../config';
+import { grantableScopes } from '../services/tools';
 import type { Scope } from '../services/oauth/scopes';
 import type { PrincipalContext } from '../services/permissions';
 
@@ -41,6 +42,9 @@ export async function resolveAuth(strapi: Core.Strapi, token: string): Promise<M
     if (!client) throw new Error('invalid_token');
     scopes = scopes.filter((s) => client.scopes.includes(s));
   }
+
+  const grantable = grantableScopes(strapi);
+  scopes = scopes.filter((s) => grantable.includes(s));
 
   const principal = await plugin.service('permissions').loadPrincipal(claims.sub);
   if (!principal) {
