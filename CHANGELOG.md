@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+### Fixed
+
+- **Component fields were invisible to the AI.** `strapi_content_get_schema` left every component field (e.g. a repeatable `toc`) out of `attributes` and `writableFields`, because Strapi stores component permissions as leaf paths (`toc.title`, `toc.link`) and the check only looked at the field name. A component now counts as readable or writable when any of its nested fields is permitted — Strapi's own rule. Dynamic zones were not affected.
+- **Saved components looked unsaved.** `create_entry`, `update_entry`, `publish_entry` and `discard_draft` responses, and `get_entry` / `list_entries` without `populate`, omitted components and dynamic zones, so a successful write appeared to have done nothing. Components and dynamic zones are now always included, all levels deep (still filtered by field permissions); relations and media remain opt-in via `populate`.
+
 ## 0.2.1
 
 ### Breaking

@@ -24,6 +24,18 @@ export default ({
       allowedOrigins: env.array('MCP_ALLOWED_ORIGINS', ['http://localhost:1337']),
       // The suite makes hundreds of calls as one admin; don't let the
       // default per-principal limit turn into flaky failures.
+      // TEST FIXTURE ONLY. Publish and delete tools are deliberately off by
+      // default in the plugin; this opts in the same way a real project must
+      // (tools.enabled), because the suite exercises those tools.
+      tools: {
+        enabled: {
+          strapi_content_publish_entry: true,
+          strapi_content_unpublish_entry: true,
+          strapi_content_delete_entry: true,
+          strapi_media_delete: true,
+          strapi_media_delete_folder: true,
+        },
+      },
       rateLimit: {
         perPrincipal: { capacity: 10000, refillPerSec: 1000 },
         perIp: { capacity: 10000, refillPerSec: 1000 },

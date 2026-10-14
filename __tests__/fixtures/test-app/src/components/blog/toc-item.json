@@ -1,0 +1,9 @@
+{
+  "collectionName": "components_blog_toc_items",
+  "info": { "displayName": "TOC Item" },
+  "options": {},
+  "attributes": {
+    "title": { "type": "string", "required": true },
+    "link": { "type": "string", "required": true }
+  }
+}

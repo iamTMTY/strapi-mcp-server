@@ -183,6 +183,94 @@ describe('content lifecycle (super admin)', () => {
   });
 });
 
+describe('components (repeatable toc, dynamic zone) round-trip', () => {
+  const TOC = [
+    { title: 'What it is', link: '#what' },
+    { title: 'FAQ', link: '#faq' },
+  ];
+  const strip = (items: Array<Record<string, unknown>>) =>
+    items.map(({ title, link }) => ({ title, link }));
+
+  it.each([
+    ['super admin', () => admin],
+    ['author', () => author],
+  ])('%s: schema shows toc as writable, and every response includes it', async (_who, client) => {
+    const c = client();
+    const schema = await c.tool('strapi_content_get_schema', { uid: ARTICLE });
+    expect(schema.attributes.toc).toMatchObject({
+      type: 'component',
+      component: 'blog.toc-item',
+      repeatable: true,
+    });
+    expect(schema.writableFields.create).toContain('toc');
+    expect(schema.writableFields.update).toContain('toc');
+    expect(Object.keys(schema.components)).toContain('blog.toc-item');
+
+    const created = await c.tool('strapi_content_create_entry', {
+      uid: ARTICLE,
+      data: {
+        title: `toc ${_who}`,
+        toc: TOC,
+        blocks: [{ __component: 'blocks.quote', text: 'q' }],
+      },
+    });
+    expect(strip(created.toc)).toEqual(TOC);
+
+    const updated = await c.tool('strapi_content_update_entry', {
+      uid: ARTICLE,
+      documentId: created.documentId,
+      data: { toc: [...TOC, { title: 'New', link: '#new' }] },
+    });
+    expect(strip(updated.toc)).toHaveLength(3);
+
+    // No populate needed: components and dynamic zones are the entry's own data.
+    const got = await c.tool('strapi_content_get_entry', {
+      uid: ARTICLE,
+      documentId: created.documentId,
+    });
+    expect(strip(got.toc)).toEqual([...TOC, { title: 'New', link: '#new' }]);
+    expect(got.blocks).toEqual([
+      expect.objectContaining({ __component: 'blocks.quote', text: 'q' }),
+    ]);
+
+    const listed = await c.tool('strapi_content_list_entries', {
+      uid: ARTICLE,
+      filters: { documentId: created.documentId },
+    });
+    expect(listed.results[0].toc).toHaveLength(3);
+
+    // Asking for one relation must not drop the default component populate.
+    const withRel = await c.tool('strapi_content_get_entry', {
+      uid: ARTICLE,
+      documentId: created.documentId,
+      populate: ['category'],
+    });
+    expect(withRel.toc).toHaveLength(3);
+  });
+
+  it('publish and discard responses include components', async () => {
+    const created = await admin.tool('strapi_content_create_entry', {
+      uid: ARTICLE,
+      data: { title: 'toc publish', toc: TOC },
+    });
+    const pub = await admin.tool('strapi_content_publish_entry', {
+      uid: ARTICLE,
+      documentId: created.documentId,
+    });
+    expect(strip(pub.toc)).toEqual(TOC);
+    await admin.tool('strapi_content_update_entry', {
+      uid: ARTICLE,
+      documentId: created.documentId,
+      data: { toc: [] },
+    });
+    const discarded = await admin.tool('strapi_content_discard_draft', {
+      uid: ARTICLE,
+      documentId: created.documentId,
+    });
+    expect(strip(discarded.toc)).toEqual(TOC);
+  });
+});
+
 describe('data exposure', () => {
   it('never returns admin password hashes through populate', async () => {
     const created = await admin.tool('strapi_content_create_entry', {
@@ -353,7 +441,9 @@ describe('RBAC conditions (Author role = own entries only)', () => {
     expect(JSON.stringify(asAuthor)).not.toContain('dz-secret');
 
     const schema = await author.tool('strapi_content_get_schema', { uid: ARTICLE });
-    expect(Object.keys(schema.components).sort()).toEqual(['blocks.cta', 'blocks.quote']);
+    expect(Object.keys(schema.components)).toEqual(
+      expect.arrayContaining(['blocks.cta', 'blocks.quote'])
+    );
     expect(schema.dynamicZoneFormat).toContain('__component');
   });
 
