@@ -258,10 +258,35 @@ describe('content tools — RBAC via permission-checker', () => {
   });
 
   it('get_schema hides private and unreadable fields and resolves nested components', async () => {
-    const { call, parse } = setup({ checker: makeChecker({ readableFields: ['title', 'seo'] }) });
+    // Strapi stores component permissions as leaf paths, never as "seo" itself.
+    const { call, parse } = setup({
+      checker: makeChecker({ readableFields: ['title', 'seo.meta', 'seo.image.alt'] }),
+    });
     const out = await parse(call('strapi_content_get_schema', { uid: 'api::article.article' }));
     expect(Object.keys(out.attributes)).toEqual(['title', 'seo']);
     expect(Object.keys(out.components).sort()).toEqual(['shared.img', 'shared.seo']);
+  });
+
+  it('a component counts as readable/writable when only a deeply nested leaf is permitted', async () => {
+    const { call, parse } = setup({ checker: makeChecker({ readableFields: ['seo.image.alt'] }) });
+    const out = await parse(call('strapi_content_get_schema', { uid: 'api::article.article' }));
+    expect(Object.keys(out.attributes)).toEqual(['seo']);
+    expect(out.writableFields).toEqual({ create: ['seo'], update: ['seo'] });
+  });
+
+  it('a component with no permitted leaf stays hidden', async () => {
+    const { call, parse } = setup({ checker: makeChecker({ readableFields: ['title'] }) });
+    const out = await parse(call('strapi_content_get_schema', { uid: 'api::article.article' }));
+    expect(Object.keys(out.attributes)).toEqual(['title']);
+  });
+
+  it('reads include components (all levels) by default, without asking for populate', async () => {
+    const { call, docApi } = setup();
+    await call('strapi_content_list_entries', { uid: 'api::article.article' });
+    const params = (docApi.findMany.mock.calls[0] as unknown[])[0] as {
+      populate: Record<string, unknown>;
+    };
+    expect(params.populate.seo).toEqual({ populate: { image: true } });
   });
 });
 
@@ -361,5 +386,38 @@ describe('content tools — per-action locales and writable fields', () => {
     const { call, parse } = setup({ checker });
     const out = await parse(call('strapi_content_get_schema', { uid: 'api::article.article' }));
     expect(out.writableFields).toEqual({ create: ['title', 'seo'], update: ['title', 'seo'] });
+  });
+});
+
+describe('componentPopulate', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { componentPopulate } = require('../../../server/src/services/tools/content');
+  const strapi = {
+    contentTypes: {},
+    components: {
+      'a.self': {
+        attributes: {
+          label: { type: 'string' },
+          child: { type: 'component', component: 'a.self' },
+        },
+      },
+      'a.leaf': {
+        attributes: { text: { type: 'string' }, rel: { type: 'relation', target: 'api::x.x' } },
+      },
+    },
+  };
+
+  it('nests components, uses `on` for dynamic zones, skips relations, and survives cycles', () => {
+    expect(
+      componentPopulate(strapi, {
+        title: { type: 'string' },
+        self: { type: 'component', component: 'a.self' },
+        zone: { type: 'dynamiczone', components: ['a.leaf', 'a.self'] },
+        author: { type: 'relation', target: 'api::x.x' },
+      })
+    ).toEqual({
+      self: { populate: { child: true } },
+      zone: { on: { 'a.leaf': {}, 'a.self': { populate: { child: true } } } },
+    });
   });
 });

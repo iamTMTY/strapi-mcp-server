@@ -105,8 +105,18 @@ export function createContentTools(strapi: Core.Strapi): ToolDef[] {
     return (await populateBuilder(uid).populateFromQuery(query).build()) ?? {};
   }
 
+  /**
+   * Populate for anything we return after a write: what the role's conditions
+   * need, plus the entry's own components and dynamic zones (see
+   * componentPopulate) so the caller sees what it just wrote.
+   */
   async function outputPopulate(c: ContentChecker, uid: string): Promise<Doc> {
-    return conditionPopulate(c, uid, await c.sanitizedQuery.read({}));
+    return (
+      mergePopulate(
+        await conditionPopulate(c, uid, await c.sanitizedQuery.read({})),
+        componentPopulate(strapi, cts()[uid].attributes)
+      ) ?? {}
+    );
   }
 
   /**
@@ -122,7 +132,13 @@ export function createContentTools(strapi: Core.Strapi): ToolDef[] {
     const clean = Object.fromEntries(
       Object.entries({
         ...query,
-        populate: normalizePopulate(strapi, cts()[uid], query.populate),
+        // Components and dynamic zones are part of the entry's own data, so
+        // they're always included (and still sanitized per field below);
+        // relations and media stay opt-in via `populate`.
+        populate: mergePopulate(
+          componentPopulate(strapi, cts()[uid].attributes),
+          normalizePopulate(strapi, cts()[uid], query.populate)
+        ),
       }).filter(([, v]) => v !== undefined)
     );
     try {
@@ -283,9 +299,11 @@ export function createContentTools(strapi: Core.Strapi): ToolDef[] {
       async run({ uid }, auth) {
         const c = await checker(auth, uid, 'read');
         const ct = cts()[uid];
+        const allowed = (action: 'read' | 'create' | 'update', name: string) =>
+          fieldAllowed(strapi, c, action, name, ct.attributes[name]);
         const attributes = Object.fromEntries(
           Object.entries(ct.attributes).filter(
-            ([name, attr]) => !attr.private && c.can.read(undefined, name)
+            ([name, attr]) => !attr.private && allowed('read', name)
           )
         );
         const names = Object.keys(attributes);
@@ -299,8 +317,8 @@ export function createContentTools(strapi: Core.Strapi): ToolDef[] {
           components: collectComponents(strapi, attributes),
           // Field-level permissions per write action; anything else in `data` is dropped.
           writableFields: {
-            create: names.filter((n) => c.can.create(undefined, n)),
-            update: names.filter((n) => c.can.update(undefined, n)),
+            create: names.filter((n) => allowed('create', n)),
+            update: names.filter((n) => allowed('update', n)),
           },
           ...(Object.values(attributes).some((a) => a.type === 'dynamiczone')
             ? {
@@ -567,10 +585,14 @@ export function createContentTools(strapi: Core.Strapi): ToolDef[] {
         });
         if (!draft) throw notFound();
         if (c.cannot.publish(draft)) throw forbidden();
-        const result = (await docs(input.uid).publish({ documentId, locale } as never)) as {
-          entries?: Doc[];
-        };
-        return present(auth, c, input.uid, result.entries?.[0] ?? null);
+        await docs(input.uid).publish({ documentId, locale } as never);
+        const published = (await docs(input.uid).findOne({
+          documentId,
+          locale,
+          status: 'published',
+          populate: await outputPopulate(c, input.uid),
+        } as never)) as Doc | null;
+        return present(auth, c, input.uid, published);
       },
     }),
 
@@ -645,10 +667,14 @@ export function createContentTools(strapi: Core.Strapi): ToolDef[] {
         });
         if (!published) throw notFound('Entry has no published version to reset to.');
         if (c.cannot.discard(published)) throw forbidden();
-        const result = (await docs(input.uid).discardDraft({ documentId, locale } as never)) as {
-          entries?: Doc[];
-        };
-        return present(auth, c, input.uid, result.entries?.[0] ?? null);
+        await docs(input.uid).discardDraft({ documentId, locale } as never);
+        const draft = (await docs(input.uid).findOne({
+          documentId,
+          locale,
+          status: 'draft',
+          populate: await outputPopulate(c, input.uid),
+        } as never)) as Doc | null;
+        return present(auth, c, input.uid, draft);
       },
     }),
   ];
@@ -684,13 +710,6 @@ function normalizePopulate(strapi: Core.Strapi, ct: CT, populate: unknown): Doc 
 }
 
 function buildPopulate(strapi: Core.Strapi, attrs: Record<string, Attr>, paths: string[][]): Doc {
-  const attributesOf = (uid: string | undefined): Record<string, Attr> =>
-    (uid &&
-      (
-        (strapi.contentTypes as unknown as Record<string, CT>)[uid] ??
-        (strapi.components as unknown as Record<string, CT>)[uid]
-      )?.attributes) ||
-    {};
   const out: Doc = {};
   const heads = [...new Set(paths.map((p) => p[0]))];
   for (const head of heads) {
@@ -703,7 +722,7 @@ function buildPopulate(strapi: Core.Strapi, attrs: Record<string, Attr>, paths: 
       out[head] = {
         on: Object.fromEntries(
           (attr.components ?? []).map((uid) => {
-            const compAttrs = attributesOf(uid);
+            const compAttrs = attributesOf(strapi, uid);
             const own = rests.filter((r) => r[0] in compAttrs);
             return [
               uid,
@@ -715,10 +734,10 @@ function buildPopulate(strapi: Core.Strapi, attrs: Record<string, Attr>, paths: 
     } else {
       const nested =
         attr.type === 'component'
-          ? attributesOf(attr.component)
+          ? attributesOf(strapi, attr.component)
           : attr.type === 'media'
-            ? attributesOf('plugin::upload.file')
-            : attributesOf(attr.target);
+            ? attributesOf(strapi, 'plugin::upload.file')
+            : attributesOf(strapi, attr.target);
       out[head] = { populate: buildPopulate(strapi, nested, rests) };
     }
   }
@@ -730,9 +749,95 @@ function mergePopulate(a: unknown, b: unknown): Doc | undefined {
   if (!isObj(a)) return isObj(b) ? b : undefined;
   if (!isObj(b)) return a;
   const out: Doc = { ...a };
-  for (const [k, v] of Object.entries(b))
+  for (const [k, v] of Object.entries(b)) {
+    // A bare `true` ("populate this one level") must not throw away a deeper
+    // populate already requested for the same key.
+    if (v === true && isObj(out[k])) continue;
     out[k] = isObj(out[k]) && isObj(v) ? mergePopulate(out[k], v) : v;
+  }
   return out;
+}
+
+const MAX_COMPONENT_DEPTH = 10;
+
+function attributesOf(strapi: Core.Strapi, uid: string | undefined): Record<string, Attr> {
+  return (
+    (uid &&
+      (
+        (strapi.contentTypes as unknown as Record<string, CT>)[uid] ??
+        (strapi.components as unknown as Record<string, CT>)[uid]
+      )?.attributes) ||
+    {}
+  );
+}
+
+/**
+ * Populate for every component and dynamic zone reachable from `attrs`, all
+ * levels deep — the entry's own data, which Strapi v5 otherwise omits unless
+ * asked for. Relations and media inside them are not included. Cycle-safe.
+ */
+export function componentPopulate(
+  strapi: Core.Strapi,
+  attrs: Record<string, Attr>,
+  seen: Set<string> = new Set()
+): Doc {
+  const out: Doc = {};
+  if (seen.size >= MAX_COMPONENT_DEPTH) return out;
+  const nested = (uid: string): Doc | true => {
+    if (seen.has(uid)) return true;
+    const inner = componentPopulate(strapi, attributesOf(strapi, uid), new Set([...seen, uid]));
+    return Object.keys(inner).length ? { populate: inner } : true;
+  };
+  for (const [name, attr] of Object.entries(attrs)) {
+    if (attr.type === 'component' && attr.component) {
+      out[name] = nested(attr.component);
+    } else if (attr.type === 'dynamiczone') {
+      out[name] = {
+        on: Object.fromEntries(
+          (attr.components ?? []).map((uid) => {
+            const n = nested(uid);
+            return [uid, n === true ? {} : n];
+          })
+        ),
+      };
+    }
+  }
+  return out;
+}
+
+/**
+ * Strapi stores field permissions for components as leaf paths ("toc.title",
+ * "seo.meta.description"), never as the component field itself, and its own
+ * sanitizer allows a field when any permitted path starts with it. CASL's
+ * `can(action, subject, field)` has no such prefix rule, so check the leaves.
+ */
+export function fieldAllowed(
+  strapi: Core.Strapi,
+  c: ContentChecker,
+  action: 'read' | 'create' | 'update',
+  name: string,
+  attr: Attr | undefined
+): boolean {
+  if (c.can[action](undefined, name)) return true;
+  if (attr?.type !== 'component' || !attr.component) return false;
+  return leafPaths(strapi, name, attr.component, new Set()).some((p) =>
+    c.can[action](undefined, p)
+  );
+}
+
+function leafPaths(
+  strapi: Core.Strapi,
+  prefix: string,
+  component: string,
+  seen: Set<string>
+): string[] {
+  if (seen.has(component) || seen.size >= MAX_COMPONENT_DEPTH) return [];
+  const next = new Set([...seen, component]);
+  return Object.entries(attributesOf(strapi, component)).flatMap(([name, a]) =>
+    a.type === 'component' && a.component
+      ? leafPaths(strapi, `${prefix}.${name}`, a.component, next)
+      : [`${prefix}.${name}`]
+  );
 }
 
 /** Every component reachable from `attributes`, nested ones included (cycle-safe). */

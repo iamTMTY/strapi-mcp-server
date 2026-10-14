@@ -31,7 +31,8 @@ npm run test-app:reset   # delete the fixture sqlite DB
 
 The fixture Strapi app lives at `__tests__/fixtures/test-app/` and is an npm
 workspace (`"strapi-mcp-server": "file:../../.."`). It has `article`
-(draft & publish, relation to `category`, a `blocks` dynamic zone) and
+(draft & publish, relation to `category`, a repeatable `toc` component, a
+`blocks` dynamic zone) and
 `category` (localized) so integration tests cover relations, dynamic zones,
 i18n and Author-role conditions. `npm run test-app:build` must succeed —
 TS errors there (e.g. controllers for a new type the generated types don't
@@ -157,6 +158,13 @@ Never hand-roll permission checks. Content tools use the Content Manager's
   entries to `{ documentId }`.
 - **Invalid queries are rejected** (`validateQuery`) rather than silently
   sanitized away.
+- **Component permissions are leaf paths.** Strapi stores `toc.title`, never
+  `toc`, and allows a field when any permitted path starts with it; CASL's
+  `can(…, field)` has no prefix rule. Use `fieldAllowed` (checks the leaves)
+  for any per-field decision on components.
+- **Components and dynamic zones are always populated** (`componentPopulate`,
+  all levels, no relations/media) in reads and write responses — Strapi v5
+  omits them otherwise, which makes successful writes look lost.
 - **Tool listing** (`toolsFor`) hides tools whose `requires` capability the
   role lacks everywhere; handlers still check per document.
 - Strapi default role permissions for a type localized _after_ the role was

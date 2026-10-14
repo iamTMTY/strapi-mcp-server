@@ -28,6 +28,11 @@
       "relation": "manyToOne",
       "target": "api::category.category"
     },
+    "toc": {
+      "type": "component",
+      "component": "blog.toc-item",
+      "repeatable": true
+    },
     "blocks": {
       "type": "dynamiczone",
       "components": ["blocks.cta", "blocks.quote"]
