@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Box, Typography } from '@strapi/design-system';
+import { isSafeLocalPath } from '../lib/safePath';
 
 /**
  * Bridge route used by the OAuth /authorize flow when the user is not yet
@@ -59,22 +60,6 @@ async function getAdminToken(): Promise<string | null> {
     return null;
   }
 }
-
-/**
- * Same-origin path only — never follow `javascript:`, absolute or `//host` URLs.
- * Mirrors the server's check (control characters and `\` refused, since URL
- * parsing turns `/<TAB>/host` into `//host`), then confirms the resolved origin.
- */
-const isSafeLocalPath = (p: unknown): p is string => {
-  if (typeof p !== 'string' || !p.startsWith('/') || p.startsWith('//')) return false;
-  // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f\\]/.test(p)) return false;
-  try {
-    return new URL(p, window.location.origin).origin === window.location.origin;
-  } catch {
-    return false;
-  }
-};
 
 export function SsoBridge(): JSX.Element {
   const [params] = useSearchParams();
