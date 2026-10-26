@@ -53,7 +53,8 @@ interface Overview {
   configured: boolean;
   resourceUrl: string;
   allowedOrigins: string[];
-  recentCalls: RecentCall[];
+  /** null when the viewer lacks audit.read. */
+  recentCalls: RecentCall[] | null;
   oauth: { mode: string; dcrEnabled: boolean };
 }
 
@@ -153,93 +154,97 @@ export function HomePage(): JSX.Element {
             </Grid.Root>
           </Card>
 
-          <Card title="Recent tool calls">
-            <Table colCount={7} rowCount={data.recentCalls.length}>
-              <Thead>
-                <Tr>
-                  <Th>
-                    <Typography variant="sigma">Time</Typography>
-                  </Th>
-                  <Th>
-                    <Typography variant="sigma">Principal</Typography>
-                  </Th>
-                  <Th>
-                    <Typography variant="sigma">Client</Typography>
-                  </Th>
-                  <Th>
-                    <Typography variant="sigma">Tool</Typography>
-                  </Th>
-                  <Th>
-                    <Typography variant="sigma">Status</Typography>
-                  </Th>
-                  <Th>
-                    <Typography variant="sigma">Duration</Typography>
-                  </Th>
-                  <Th>
-                    <Typography variant="sigma">&nbsp;</Typography>
-                  </Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {data.recentCalls.map((c, i) => (
-                  <Tr key={i}>
-                    <Td>
-                      <Typography variant="omega" textColor="neutral700">
-                        {new Date(c.ts).toLocaleString()}
-                      </Typography>
-                    </Td>
-                    <Td>
-                      <Typography variant="omega">
-                        {formatPrincipal(c.principalAdmin, c.principalId)}
-                      </Typography>
-                    </Td>
-                    <Td>
-                      <Typography variant="omega" textColor="neutral700">
-                        {c.client?.clientName ?? '—'}
-                      </Typography>
-                    </Td>
-                    <Td>
-                      <Typography variant="omega" fontWeight="semiBold">
-                        {c.tool}
-                      </Typography>
-                    </Td>
-                    <Td>
-                      <Badge backgroundColor={c.resultStatus === 'ok' ? 'success100' : 'danger100'}>
-                        {c.resultStatus}
-                      </Badge>
-                    </Td>
-                    <Td>
-                      <Typography variant="omega" textColor="neutral700">
-                        {c.durationMs !== undefined && c.durationMs !== null
-                          ? `${c.durationMs}ms`
-                          : ''}
-                      </Typography>
-                    </Td>
-                    <Td>
-                      <Flex justifyContent="flex-end">
-                        <IconButton
-                          label="View details"
-                          variant="ghost"
-                          onClick={() => setSelected(c)}
-                        >
-                          <Eye />
-                        </IconButton>
-                      </Flex>
-                    </Td>
-                  </Tr>
-                ))}
-                {data.recentCalls.length === 0 && (
+          {data.recentCalls && (
+            <Card title="Recent tool calls">
+              <Table colCount={7} rowCount={data.recentCalls.length}>
+                <Thead>
                   <Tr>
-                    <Td colSpan={7}>
-                      <Box paddingTop={6} paddingBottom={6}>
-                        <Typography textColor="neutral600">No activity yet.</Typography>
-                      </Box>
-                    </Td>
+                    <Th>
+                      <Typography variant="sigma">Time</Typography>
+                    </Th>
+                    <Th>
+                      <Typography variant="sigma">Principal</Typography>
+                    </Th>
+                    <Th>
+                      <Typography variant="sigma">Client</Typography>
+                    </Th>
+                    <Th>
+                      <Typography variant="sigma">Tool</Typography>
+                    </Th>
+                    <Th>
+                      <Typography variant="sigma">Status</Typography>
+                    </Th>
+                    <Th>
+                      <Typography variant="sigma">Duration</Typography>
+                    </Th>
+                    <Th>
+                      <Typography variant="sigma">&nbsp;</Typography>
+                    </Th>
                   </Tr>
-                )}
-              </Tbody>
-            </Table>
-          </Card>
+                </Thead>
+                <Tbody>
+                  {data.recentCalls.map((c, i) => (
+                    <Tr key={i}>
+                      <Td>
+                        <Typography variant="omega" textColor="neutral700">
+                          {new Date(c.ts).toLocaleString()}
+                        </Typography>
+                      </Td>
+                      <Td>
+                        <Typography variant="omega">
+                          {formatPrincipal(c.principalAdmin, c.principalId)}
+                        </Typography>
+                      </Td>
+                      <Td>
+                        <Typography variant="omega" textColor="neutral700">
+                          {c.client?.clientName ?? '—'}
+                        </Typography>
+                      </Td>
+                      <Td>
+                        <Typography variant="omega" fontWeight="semiBold">
+                          {c.tool}
+                        </Typography>
+                      </Td>
+                      <Td>
+                        <Badge
+                          backgroundColor={c.resultStatus === 'ok' ? 'success100' : 'danger100'}
+                        >
+                          {c.resultStatus}
+                        </Badge>
+                      </Td>
+                      <Td>
+                        <Typography variant="omega" textColor="neutral700">
+                          {c.durationMs !== undefined && c.durationMs !== null
+                            ? `${c.durationMs}ms`
+                            : ''}
+                        </Typography>
+                      </Td>
+                      <Td>
+                        <Flex justifyContent="flex-end">
+                          <IconButton
+                            label="View details"
+                            variant="ghost"
+                            onClick={() => setSelected(c)}
+                          >
+                            <Eye />
+                          </IconButton>
+                        </Flex>
+                      </Td>
+                    </Tr>
+                  ))}
+                  {data.recentCalls.length === 0 && (
+                    <Tr>
+                      <Td colSpan={7}>
+                        <Box paddingTop={6} paddingBottom={6}>
+                          <Typography textColor="neutral600">No activity yet.</Typography>
+                        </Box>
+                      </Td>
+                    </Tr>
+                  )}
+                </Tbody>
+              </Table>
+            </Card>
+          )}
         </Flex>
       )}
 

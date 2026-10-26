@@ -14,17 +14,28 @@ function makeClients() {
     }),
     findOne: jest.fn(async ({ where }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return rows.find((r: any) => {
-        if (where.clientId && r.clientId !== where.clientId) return false;
-        if (where.disabled !== undefined && r.disabled !== where.disabled) return false;
-        return true;
-      }) ?? null;
+      return (
+        rows.find((r: any) => {
+          if (where.clientId && r.clientId !== where.clientId) return false;
+          if (where.disabled !== undefined && r.disabled !== where.disabled) return false;
+          return true;
+        }) ?? null
+      );
     }),
   });
-  const strapi = makeStrapi({
-    query: { 'plugin::mcp-server.oauth-client': query },
+  query.update = jest.fn(async ({ where, data }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const row = rows.find((r: any) => r.clientId === where.clientId);
+    return row ? Object.assign(row, data) : null;
   });
-  return { svc: clientsFactory({ strapi }), rows };
+  const consent = mockQuery();
+  const strapi = makeStrapi({
+    query: {
+      'plugin::mcp-server.oauth-client': query,
+      'plugin::mcp-server.oauth-consent': consent,
+    },
+  });
+  return { svc: clientsFactory({ strapi }), rows, consent };
 }
 
 describe('clients.create', () => {
@@ -166,5 +177,35 @@ describe('clients.findActive', () => {
     });
     const found = await svc.findActive(client.clientId);
     expect(found?.clientId).toBe(client.clientId);
+  });
+});
+
+describe('clients.update', () => {
+  const base = {
+    clientName: 'c',
+    scopes: ['strapi:content:read'] as never,
+    isConfidential: false,
+    createdByAdminId: '1',
+  };
+
+  it('drops remembered consents when the redirect targets change', async () => {
+    const { svc, consent } = makeClients();
+    const { client } = await svc.create({ ...base, redirectUris: ['https://app.example/cb'] });
+    await svc.update(client.clientId, { redirectUris: ['https://attacker.example/cb'] });
+    expect(consent.deleteMany).toHaveBeenCalledWith({ where: { clientId: client.clientId } });
+  });
+
+  it('keeps consents when the redirect targets are unchanged (or only a loopback port moved)', async () => {
+    const { svc, consent } = makeClients();
+    const { client } = await svc.create({
+      ...base,
+      redirectUris: ['https://app.example/cb', 'http://localhost:3000/cb'],
+    });
+    await svc.update(client.clientId, {
+      clientName: 'renamed',
+      redirectUris: ['http://localhost:4000/cb', 'https://app.example/cb'],
+    });
+    await svc.update(client.clientId, { clientName: 'again' });
+    expect(consent.deleteMany).not.toHaveBeenCalled();
   });
 });

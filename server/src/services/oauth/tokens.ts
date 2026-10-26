@@ -42,6 +42,8 @@ export interface VerifiedClaims {
   scope: Scope[];
   clientId: string;
   jti: string;
+  /** Refresh family the access token was minted into (embedded mode). */
+  fid?: string;
   exp: number;
 }
 
@@ -240,6 +242,11 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       if (row) await this.revokeFamily(row.familyId);
     },
 
+    /** Whether an access token (by jti) or its whole family has been revoked. */
+    async isRevoked(jti: string, fid?: string | null): Promise<boolean> {
+      return isRevoked(strapi, jti, fid);
+    },
+
     async revokeAccessJti(jti: string, expiresAt: Date): Promise<void> {
       try {
         await strapi.db.query(REVOKE_UID).create({ data: { jti, expiresAt } });
@@ -296,10 +303,7 @@ async function verifyEmbedded(strapi: Core.Strapi, token: string): Promise<Verif
   if (!jti) throw new Error('invalid_token');
 
   const fid = typeof claims.fid === 'string' ? claims.fid : '';
-  const revoked = await strapi.db.query(REVOKE_UID).findOne({
-    where: { jti: { $in: fid ? [jti, familyMarker(fid)] : [jti] } },
-  });
-  if (revoked) throw new Error('invalid_token');
+  if (await isRevoked(strapi, jti, fid)) throw new Error('invalid_token');
 
   const sub = typeof claims.sub === 'string' ? claims.sub : '';
   const clientId = typeof claims.client_id === 'string' ? claims.client_id : '';
@@ -310,8 +314,15 @@ async function verifyEmbedded(strapi: Core.Strapi, token: string): Promise<Verif
     scope: parseScope(claims.scope),
     clientId,
     jti,
+    ...(fid ? { fid } : {}),
     exp: typeof claims.exp === 'number' ? claims.exp : 0,
   };
+}
+
+async function isRevoked(strapi: Core.Strapi, jti: string, fid?: string | null): Promise<boolean> {
+  const keys = [jti, fid && familyMarker(fid)].filter(Boolean) as string[];
+  if (!keys.length) return false;
+  return !!(await strapi.db.query(REVOKE_UID).findOne({ where: { jti: { $in: keys } } }));
 }
 
 async function verifyExternal(strapi: Core.Strapi, token: string): Promise<VerifiedClaims> {

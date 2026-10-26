@@ -13,6 +13,7 @@ const CONTENT_TYPES = {
       title: { type: 'string' },
       secret: { type: 'string', private: true },
       seo: { type: 'component', component: 'shared.seo' },
+      cover: { type: 'media' },
     },
   },
   'api::page.page': {
@@ -287,6 +288,18 @@ describe('content tools — RBAC via permission-checker', () => {
       populate: Record<string, unknown>;
     };
     expect(params.populate.seo).toEqual({ populate: { image: true } });
+  });
+
+  it("never populates a media file's own relations (they can point at any type)", async () => {
+    const { call, docApi } = setup();
+    await call('strapi_content_list_entries', {
+      uid: 'api::article.article',
+      populate: ['cover.related', 'cover.folder'],
+    });
+    const params = (docApi.findMany.mock.calls[0] as unknown[])[0] as {
+      populate: Record<string, unknown>;
+    };
+    expect(params.populate.cover).toBe(true);
   });
 });
 

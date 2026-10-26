@@ -21,6 +21,8 @@
     },
     "adminUserId": { "type": "string", "required": true, "maxLength": 64 },
     "clientId": { "type": "string", "required": true, "maxLength": 128 },
+    "jti": { "type": "string", "maxLength": 64 },
+    "familyId": { "type": "string", "maxLength": 64 },
     "folderId": { "type": "integer" },
     "alternativeText": { "type": "text" },
     "caption": { "type": "text" },

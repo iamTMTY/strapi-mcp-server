@@ -19,6 +19,7 @@ export interface McpAuth {
   scopes: Scope[];
   clientId: string;
   jti: string;
+  fid?: string;
   adminUserId: string;
   exp: number;
   token: string;
@@ -61,6 +62,7 @@ export async function resolveAuth(strapi: Core.Strapi, token: string): Promise<M
     scopes,
     clientId: claims.clientId,
     jti: claims.jti,
+    fid: claims.fid,
     adminUserId: claims.sub,
     exp: claims.exp,
     token,
