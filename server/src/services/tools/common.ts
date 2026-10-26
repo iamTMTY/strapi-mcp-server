@@ -10,6 +10,9 @@ export interface ToolAuth {
   principal: PrincipalContext;
   scopes: Scope[];
   clientId: string;
+  /** The access token behind this call, for credentials derived from it. */
+  jti?: string;
+  fid?: string;
 }
 
 export interface ToolAnnotations {

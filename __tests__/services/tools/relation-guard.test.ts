@@ -17,6 +17,8 @@ function setup(readable: Record<string, boolean>) {
           hero: { type: 'component', component: 'shared.hero' },
           blocks: { type: 'dynamiczone', components: ['blocks.cta'] },
           author: { type: 'relation', target: 'api::author.author' },
+          cover: { type: 'media' },
+          gallery: { type: 'media', multiple: true },
         },
       },
       'api::author.author': { attributes: {} },
@@ -49,6 +51,20 @@ describe('relation guard', () => {
       author: { id: 1, documentId: 'a1', name: 'Ann', sanitized: true },
       hero: { link: { documentId: 's1' } },
       blocks: [{ __component: 'blocks.cta', target: [{ documentId: 's2' }] }],
+    });
+  });
+
+  it("strips a media file's own relations (related, folder)", async () => {
+    const guard = setup({ 'api::secret.secret': false });
+    const file = {
+      id: 9,
+      name: 'a.png',
+      related: [{ id: 5, secret: 'x', __type: 'api::secret.secret' }],
+      folder: { id: 1 },
+    };
+    expect(await guard.apply('api::page.page', { cover: file, gallery: [file] })).toEqual({
+      cover: { id: 9, name: 'a.png' },
+      gallery: [{ id: 9, name: 'a.png' }],
     });
   });
 

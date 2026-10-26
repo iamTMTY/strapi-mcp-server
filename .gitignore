@@ -7,3 +7,5 @@ dist/
 .env.*
 coverage/
 .tmp/
+
+_tmp/

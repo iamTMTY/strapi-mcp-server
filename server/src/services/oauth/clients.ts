@@ -148,7 +148,19 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       if (patch.scopes) {
         patch.scopes = patch.scopes.filter((s) => (ALL_SCOPES as readonly string[]).includes(s));
       }
+      const before = patch.redirectUris
+        ? await strapi.db.query(UID).findOne({ where: { clientId } })
+        : null;
+      const oldSig =
+        before && canonicalUriSetSig(Array.isArray(before.redirectUris) ? before.redirectUris : []);
       const row = await strapi.db.query(UID).update({ where: { clientId }, data: patch });
+      // Remembered consent was given for the redirect targets shown at the
+      // time; new targets must be seen and approved again.
+      if (oldSig && oldSig !== canonicalUriSetSig(patch.redirectUris!)) {
+        await strapi.db
+          .query('plugin::mcp-server.oauth-consent')
+          .deleteMany({ where: { clientId } });
+      }
       return row ? normalize(row) : null;
     },
 
@@ -159,7 +171,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
 
     async touchLastUsed(clientId: string): Promise<void> {
       try {
-        await strapi.db.query(UID).update({ where: { clientId }, data: { lastUsedAt: new Date() } });
+        await strapi.db
+          .query(UID)
+          .update({ where: { clientId }, data: { lastUsedAt: new Date() } });
       } catch {
         /* non-fatal */
       }
@@ -274,9 +288,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       await strapi.db
         .query('plugin::mcp-server.oauth-refresh-token')
         .deleteMany({ where: { clientId } });
-      await strapi.db
-        .query('plugin::mcp-server.oauth-consent')
-        .deleteMany({ where: { clientId } });
+      await strapi.db.query('plugin::mcp-server.oauth-consent').deleteMany({ where: { clientId } });
       return Boolean(row);
     },
   };
@@ -372,13 +384,22 @@ function validateRedirectUris(uris: string[]): void {
     } catch {
       throw new Error(`invalid redirectUri: ${u}`);
     }
-    if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1' && parsed.protocol !== 'http:') {
+    if (
+      parsed.protocol !== 'https:' &&
+      parsed.hostname !== 'localhost' &&
+      parsed.hostname !== '127.0.0.1' &&
+      parsed.protocol !== 'http:'
+    ) {
       // permit non-http(s) custom schemes (e.g. vscode://) — but no javascript:
       if (parsed.protocol === 'javascript:' || parsed.protocol === 'data:') {
         throw new Error(`unsafe redirectUri scheme: ${parsed.protocol}`);
       }
     }
-    if (parsed.protocol === 'http:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+    if (
+      parsed.protocol === 'http:' &&
+      parsed.hostname !== 'localhost' &&
+      parsed.hostname !== '127.0.0.1'
+    ) {
       throw new Error(`http:// redirectUri only allowed for loopback: ${u}`);
     }
     if (parsed.hash) throw new Error('redirectUri cannot include a fragment');

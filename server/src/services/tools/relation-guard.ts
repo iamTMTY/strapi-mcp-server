@@ -113,6 +113,15 @@ export function createRelationGuard(strapi: Core.Strapi, principal: PrincipalCon
         // eslint-disable-next-line no-await-in-loop
         const walked = await Promise.all(list.map((v) => walk(attr.component!, v)));
         out[name] = Array.isArray(value) ? walked : walked[0];
+      } else if (attr.type === 'media') {
+        // A file's `related` (morph, any type) and `folder` are never guarded
+        // per target, so they never leave.
+        const strip = (f: Doc) => {
+          if (!f || typeof f !== 'object') return f;
+          const { related: _r, folder: _f, ...rest } = f;
+          return rest;
+        };
+        out[name] = Array.isArray(value) ? value.map(strip) : strip(value);
       } else if (attr.type === 'dynamiczone' && Array.isArray(value)) {
         // eslint-disable-next-line no-await-in-loop
         out[name] = await Promise.all(

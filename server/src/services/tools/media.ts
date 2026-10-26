@@ -720,6 +720,8 @@ export function createMediaTools(strapi: Core.Strapi): ToolDef[] {
           .issue({
             adminUserId: String(auth.principal.user.id),
             clientId: auth.clientId,
+            jti: auth.jti,
+            familyId: auth.fid,
             alternativeText: input.alternativeText,
             caption: input.caption,
             folderId: folderId ?? undefined,

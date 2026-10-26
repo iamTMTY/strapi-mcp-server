@@ -10,6 +10,8 @@ export interface UploadTicketRow {
   id: number;
   adminUserId: string;
   clientId: string;
+  jti: string | null;
+  familyId: string | null;
   folderId: number | null;
   alternativeText: string | null;
   caption: string | null;
@@ -20,7 +22,8 @@ export interface UploadTicketRow {
 /**
  * One-time upload URLs. The ticket is a bearer capability the model can see
  * and pass to `curl`, so it is single-use, short-lived, bound to the admin +
- * client that asked for it, and stored only as a hash.
+ * client that asked for it, dies with the access token (or token family) that
+ * minted it, and is stored only as a hash.
  */
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -29,6 +32,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     async issue(input: {
       adminUserId: string;
       clientId: string;
+      jti?: string;
+      familyId?: string;
       folderId?: number;
       alternativeText?: string;
       caption?: string;
@@ -40,6 +45,8 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
           ticketHash: sha256(ticket),
           adminUserId: input.adminUserId,
           clientId: input.clientId,
+          jti: input.jti || null,
+          familyId: input.familyId || null,
           folderId: input.folderId ?? null,
           alternativeText: input.alternativeText ?? null,
           caption: input.caption ?? null,

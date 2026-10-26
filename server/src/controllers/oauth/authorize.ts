@@ -22,14 +22,16 @@ interface AuthorizeQuery {
 /**
  * Same-origin path only. Rejects absolute URLs, `javascript:`, and the
  * protocol-relative `//host` / `/\host` forms browsers treat as cross-origin.
+ * Control characters and backslashes are refused anywhere: URL parsing drops
+ * tabs/newlines and reads `\` as `/`, so `/<TAB>/host` would become `//host`.
  */
 export function isSafeLocalPath(p: unknown): p is string {
   return (
     typeof p === 'string' &&
     p.startsWith('/') &&
     !p.startsWith('//') &&
-    !p.startsWith('/\\') &&
-    !/[\r\n]/.test(p)
+    // eslint-disable-next-line no-control-regex
+    !/[\u0000-\u001f\u007f\\]/.test(p)
   );
 }
 

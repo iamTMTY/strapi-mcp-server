@@ -18,12 +18,20 @@ function tempFile(name: string, content: Buffer): string {
 }
 
 function setup(
-  opts: { claim?: unknown; clientScopes?: string[] | null; principal?: unknown } = {}
+  opts: {
+    claim?: unknown;
+    clientScopes?: string[] | null;
+    principal?: unknown;
+    revoked?: boolean;
+    config?: Record<string, unknown>;
+  } = {}
 ) {
   const ticketRow = {
     id: 1,
     adminUserId: '1',
     clientId: 'cid',
+    jti: 'j1',
+    familyId: 'f1',
     folderId: null,
     alternativeText: 'alt',
     caption: null,
@@ -32,8 +40,12 @@ function setup(
     upload: jest.fn(async () => [{ id: 9, name: 'a.png', url: '/u/a.png', hash: 'h' }]),
   };
   const pm = { isAllowed: true, sanitizeOutput: async (d: unknown) => d };
+  const isRevoked = jest.fn(async () => opts.revoked ?? false);
   const strapi = makeStrapi({
+    config: opts.config,
     services: {
+      tokens: { isRevoked },
+      'tool-registry': { list: () => [] },
       'upload-tickets': {
         claim: jest.fn(async () => (opts.claim === undefined ? ticketRow : opts.claim)),
       },
@@ -57,7 +69,7 @@ function setup(
   s.plugin = jest.fn((name: string) =>
     name === 'upload' ? { service: () => uploadSvc } : base(name)
   );
-  return { controller: uploadsFactory({ strapi }), uploadSvc, strapi };
+  return { controller: uploadsFactory({ strapi }), uploadSvc, strapi, isRevoked };
 }
 
 function ctx(files?: Record<string, unknown>) {
@@ -116,6 +128,41 @@ describe('uploads.receive', () => {
       await controller.receive(c as any);
       expect(c.status).toBe(403);
     }
+  });
+
+  it('403s when the minting token or its family was revoked', async () => {
+    const { controller, uploadSvc, isRevoked } = setup({ revoked: true });
+    const c = ctx({ file: { filepath: tempFile('a.png', PNG), originalFilename: 'a.png' } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await controller.receive(c as any);
+    expect(isRevoked).toHaveBeenCalledWith('j1', 'f1');
+    expect(c.status).toBe(403);
+    expect(uploadSvc.upload).not.toHaveBeenCalled();
+  });
+
+  it('403s when every media write tool was disabled since issue', async () => {
+    const { controller, uploadSvc } = setup({
+      config: {
+        tools: {
+          enabled: Object.fromEntries(
+            [
+              'strapi_media_upload',
+              'strapi_media_request_upload',
+              'strapi_media_update',
+              'strapi_media_move',
+              'strapi_media_create_folder',
+              'strapi_media_rename_folder',
+              'strapi_media_move_folder',
+            ].map((n) => [n, false])
+          ),
+        },
+      },
+    });
+    const c = ctx({ file: { filepath: tempFile('a.png', PNG), originalFilename: 'a.png' } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await controller.receive(c as any);
+    expect(c.status).toBe(403);
+    expect(uploadSvc.upload).not.toHaveBeenCalled();
   });
 
   it('400s on content that does not match the extension', async () => {

@@ -7,6 +7,7 @@ import { storeUpload, safeFilename, mimeForUpload } from '../services/tools/medi
 import { isProviderError } from '../services/tools/common';
 import type { UploadTicketRow } from '../services/upload-tickets';
 import { getConfig } from '../config';
+import { grantableScopes } from '../services/tools';
 
 export const UPLOAD_PATH_PREFIX = '/mcp/uploads/';
 
@@ -150,10 +151,19 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
           userAgent: ctx.request.header['user-agent'] as string | undefined,
         });
 
-      // Re-check everything as of now: the admin, the client and its scope.
+      // Re-check everything as of now: the admin, the client and its scope,
+      // the minting token or its family not revoked, the scope still enabled.
       const principal = await plugin.service('permissions').loadPrincipal(claimed.adminUserId);
       const client = await plugin.service('clients').findActive(claimed.clientId);
-      if (!principal || !client || !client.scopes.includes('strapi:media:write')) {
+      const revoked =
+        !!claimed.jti && (await plugin.service('tokens').isRevoked(claimed.jti, claimed.familyId));
+      if (
+        !principal ||
+        !client ||
+        revoked ||
+        !client.scopes.includes('strapi:media:write') ||
+        !grantableScopes(strapi).includes('strapi:media:write')
+      ) {
         audit('error', {}, 'forbidden');
         return reply(ctx, 403, { error: 'forbidden' }, 'Upload not permitted');
       }

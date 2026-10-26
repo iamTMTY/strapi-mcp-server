@@ -715,8 +715,10 @@ function buildPopulate(strapi: Core.Strapi, attrs: Record<string, Attr>, paths: 
   for (const head of heads) {
     const rests = paths.filter((p) => p[0] === head && p.length > 1).map((p) => p.slice(1));
     const attr = attrs[head] as (Attr & { target?: string }) | undefined;
-    if (!rests.length || !attr) {
-      // Unknown names are left for the query validator to reject.
+    if (!rests.length || !attr || attr.type === 'media') {
+      // Unknown names are left for the query validator to reject. Media is a
+      // leaf: a file's own relations (`related`, `folder`) point at any type,
+      // which the root type's permissions can't vouch for.
       out[head] = true;
     } else if (attr.type === 'dynamiczone') {
       out[head] = {
@@ -735,9 +737,7 @@ function buildPopulate(strapi: Core.Strapi, attrs: Record<string, Attr>, paths: 
       const nested =
         attr.type === 'component'
           ? attributesOf(strapi, attr.component)
-          : attr.type === 'media'
-            ? attributesOf(strapi, 'plugin::upload.file')
-            : attributesOf(strapi, attr.target);
+          : attributesOf(strapi, attr.target);
       out[head] = { populate: buildPopulate(strapi, nested, rests) };
     }
   }
