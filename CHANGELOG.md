@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.3
+
+### Security fixes
+
+Upgrading is recommended.
+
+- **Open redirect in the SSO bridge.** A `next` path such as `/<TAB>/evil.example` passed the same-origin check, but browsers drop the tab and follow it as `//evil.example`, so a signed-in admin could be sent to another site. Control characters and backslashes are now refused anywhere in the path, and the bridge also checks the resolved origin.
+- **Linked media exposed unreadable entries.** `populate: ["cover.related"]` returned the full entries of any content type that used the same file, even ones the admin couldn't read. Media is now populated one level only, and a file's `related` and `folder` are never returned.
+- **Changing a client's redirect URIs kept remembered consent.** With `oauth.consent.rememberDays` above 0, an admin with `clients.manage` could point a client another admin had approved at a new URI, and codes for that admin were then issued there without a prompt. Changing a client's redirect targets now clears its remembered consents.
+- **The Overview page showed the audit log without permission.** Recent tool calls, with their arguments, IP addresses and admin emails, were returned to admins with only `Read MCP dashboard`. They now require `Read MCP audit log`; the card is hidden otherwise.
+- **Upload links survived token revocation.** One-time upload URLs stayed valid after the token family that requested them was revoked, or after the upload tools were disabled. They are now bound to the requesting access token and refused once it or its family is revoked, or once no media write tool is enabled.
+
+### Upgrading from 0.2.2
+
+No config changes needed. Strapi adds two nullable columns to the upload-ticket table on startup. Upload links issued before the upgrade are not bound to a token and stay valid until they expire (at most `upload.ticketTtlSec`). Roles that should keep seeing recent tool calls on the Overview page need `Read MCP audit log`.
+
 ## 0.2.2
 
 ### Fixed
